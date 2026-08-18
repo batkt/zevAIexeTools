@@ -1,0 +1,7 @@
+/target
+/dist
+/gen
+config.toml
+state.json
+queue.json
+zev-detector.log

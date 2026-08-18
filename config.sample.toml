@@ -1,0 +1,86 @@
+# ─── Zev Detector configuration ──────────────────────────────────────────────
+# Place this file as config.toml NEXT TO zev-detector.exe.
+# Windows paths must use single quotes so backslashes are taken literally.
+
+[server]
+url                = "https://admin.zevtabs.mn/api"
+token              = ""          # optional; sent as Authorization: Bearer <token>
+timeout_secs       = 20
+retry_count        = 3
+batch_size         = 50
+send_interval_secs = 30
+queue_max          = 5000        # events held on disk while offline
+
+[agent]
+# name defaults to the Windows computer name if left empty
+name                    = ""
+baiguullagiinId         = ""
+baiguullagiinNer        = ""
+barilgiinId             = ""
+heartbeat_interval_secs = 60
+
+# ─── 1. Windows Event Log ────────────────────────────────────────────────────
+[eventlog]
+enabled            = true
+poll_interval_secs = 60
+# Any channel the service account can open. Security needs LocalSystem,
+# which is what `install` configures.
+channels = [
+  "System",
+  "Application",
+]
+# 1=Critical 2=Error 3=Warning 4=Information — 3 catches the first three.
+max_level = 3
+# Leave empty for every provider, or list only the ones you care about, e.g.
+# providers = ["Service Control Manager", "Application Error", "Disk"]
+providers        = []
+ignore_event_ids = [10016]        # DCOM permission noise
+ignore_contains  = []
+max_per_poll     = 200
+
+# ─── 2. Windows services ─────────────────────────────────────────────────────
+# One block per service. `name` is the SCM key, not the display name.
+[[services]]
+name     = "DahuaParkingService"
+label    = "Dahua Parking (dahuarust)"
+must_run = true
+
+# [[services]]
+# name     = "ZevWorker"
+# label    = "Zev Worker"
+# must_run = true
+
+# ─── 3. Application log files ────────────────────────────────────────────────
+[logs]
+enabled            = true
+poll_interval_secs = 15
+
+[[logs.files]]
+path          = 'D:\zevtabs\dahuarust\dahuaExeRust\target\release\service.log'
+system        = "dahuarust"
+modul         = "dahua-service"
+context_lines = 8
+# pattern defaults to [ERROR]/[WARN]/[CRITICAL]/[FATAL]/panicked/Aldaa
+# pattern        = '(?i)\[(ERROR|WARN)\]'
+# ignore_pattern = 'heartbeat ok'
+
+# Watch a whole folder instead of one file:
+# [[logs.files]]
+# path   = 'D:\zevtabs\worker\logs'
+# glob   = '*.log'
+# system = "worker"
+
+# ─── 4. Health ───────────────────────────────────────────────────────────────
+[health]
+enabled            = true
+poll_interval_secs = 60
+cpu_threshold      = 90
+mem_threshold      = 90
+disk_threshold     = 90
+
+[[health.http]]
+name         = "dahua api"
+url          = "http://127.0.0.1:5000/api/health"
+expect       = "OK"
+timeout_secs = 5
+system       = "dahuarust"

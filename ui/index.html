@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Zev Detector</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ─── first-run setup wizard ─────────────────────────────────────────── -->
+<div id="wizard" class="wizard" hidden>
+  <div class="wizard-card">
+    <div class="wizard-rail">
+      <div class="brand">
+        <div class="brand-mark">Z</div>
+        <div>
+          <div class="brand-name">Zev Detector</div>
+          <div class="brand-sub">Тохиргооны шидтэн</div>
+        </div>
+      </div>
+      <ol class="wizard-steps">
+        <li data-step="0"><span class="dot"></span><span>Тавтай морил</span></li>
+        <li data-step="1"><span class="dot"></span><span>Сервер</span></li>
+        <li data-step="2"><span class="dot"></span><span>Энэ машин</span></li>
+        <li data-step="3"><span class="dot"></span><span>Юуг хянах</span></li>
+        <li data-step="4"><span class="dot"></span><span>Суулгах</span></li>
+      </ol>
+      <div class="wizard-rail-foot">v<span data-text="version"></span></div>
+    </div>
+
+    <div class="wizard-body">
+      <div class="wizard-pane" data-pane="0">
+        <h1>Тавтай морил</h1>
+        <p class="lead">Энэ шидтэн Zev Detector-г энэ машин дээр тохируулж, Windows үйлчилгээ болгон суулгана. Хэдхэн алхам.</p>
+        <div class="feature-grid">
+          <div class="feature"><div class="feature-ico ico-evt"></div><div><b>Event Log</b><span>Критикал ба алдааны бичлэг</span></div></div>
+          <div class="feature"><div class="feature-ico ico-svc"></div><div><b>Үйлчилгээ</b><span>Унтарсан, сэргэсэн төлөв</span></div></div>
+          <div class="feature"><div class="feature-ico ico-log"></div><div><b>Лог файл</b><span>service.log мөрүүд</span></div></div>
+          <div class="feature"><div class="feature-ico ico-hp"></div><div><b>Эрүүл мэнд</b><span>CPU / RAM / диск / HTTP</span></div></div>
+        </div>
+        <div class="machine-strip">
+          <div><span>Компьютер</span><b data-text="hostname"></b></div>
+          <div><span>Систем</span><b data-text="os"></b></div>
+        </div>
+      </div>
+
+      <div class="wizard-pane" data-pane="1">
+        <h1>Серверийн холболт</h1>
+        <p class="lead">Илэрсэн асуудлыг хаашаа илгээхийг заана уу.</p>
+        <label class="field">
+          <span>udirdlagaBack хаяг</span>
+          <input type="text" data-bind="server.url" placeholder="https://admin.zevtabs.mn/api" />
+          <small>Сүүлд нь <code>/detector</code> нэмэгдэнэ.</small>
+        </label>
+        <label class="field">
+          <span>Token <i>(заавал биш)</i></span>
+          <input type="password" data-bind="server.token" placeholder="DETECTOR_TOKEN" />
+          <small>Серверт <code>DETECTOR_TOKEN</code> тохируулсан бол ижил утгыг оруулна.</small>
+        </label>
+      </div>
+
+      <div class="wizard-pane" data-pane="2">
+        <h1>Энэ машин</h1>
+        <p class="lead">Хяналтын самбарт энэ машиныг хэрхэн харуулах вэ.</p>
+        <label class="field">
+          <span>Агентын нэр</span>
+          <input type="text" data-bind="agent.name" />
+        </label>
+        <div class="field-row">
+          <label class="field">
+            <span>Байгууллагын ID</span>
+            <input type="text" data-bind="agent.baiguullagiinId" />
+          </label>
+          <label class="field">
+            <span>Байгууллагын нэр</span>
+            <input type="text" data-bind="agent.baiguullagiinNer" />
+          </label>
+        </div>
+        <label class="field">
+          <span>Барилгын ID</span>
+          <input type="text" data-bind="agent.barilgiinId" />
+        </label>
+      </div>
+
+      <div class="wizard-pane" data-pane="3">
+        <h1>Юуг хянах вэ</h1>
+        <p class="lead">Одоо асаагаад, дараа нь дэлгэрэнгүйг тохируулж болно.</p>
+        <div class="toggle-list">
+          <label class="toggle"><input type="checkbox" data-bind="eventlog.enabled" /><span class="sw"></span><div><b>Windows Event Log</b><small>System ба Application суваг</small></div></label>
+          <label class="toggle"><input type="checkbox" data-bind="logs.enabled" /><span class="sw"></span><div><b>Лог файлууд</b><small>Програмын service.log</small></div></label>
+          <label class="toggle"><input type="checkbox" data-bind="health.enabled" /><span class="sw"></span><div><b>Эрүүл мэнд</b><small>CPU, RAM, диск, HTTP шалгалт</small></div></label>
+        </div>
+        <label class="field">
+          <span>Хянах үйлчилгээний нэр <i>(заавал биш)</i></span>
+          <input type="text" id="wiz-service" placeholder="DahuaParkingService" />
+          <small>SCM-ийн түлхүүр нэр. Дараа нь бусдыг нэмж болно.</small>
+        </label>
+      </div>
+
+      <div class="wizard-pane" data-pane="4">
+        <h1>Суулгахад бэлэн</h1>
+        <p class="lead">Тохиргоог хадгалж, Zev Detector-г автоматаар асдаг Windows үйлчилгээ болгон бүртгэнэ.</p>
+        <div class="summary" id="wiz-summary"></div>
+        <div class="uac-note">
+          <div class="uac-shield"></div>
+          <div><b>Администраторын зөвшөөрөл шаардана</b><small>Windows таниас баталгаажуулалт асууна. Үйлчилгээ LocalSystem эрхээр ажиллана.</small></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wizard-foot">
+      <button class="btn ghost" id="wiz-skip">Алгасах</button>
+      <div class="spacer"></div>
+      <button class="btn" id="wiz-back">Буцах</button>
+      <button class="btn primary" id="wiz-next">Үргэлжлүүлэх</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── main app ───────────────────────────────────────────────────────── -->
+<div id="app" class="app" hidden>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">Z</div>
+      <div>
+        <div class="brand-name">Zev Detector</div>
+        <div class="brand-sub">v<span data-text="version"></span></div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item active" data-page="overview"><i class="ico ico-home"></i><span>Тойм</span></button>
+      <div class="nav-label">Тохиргоо</div>
+      <button class="nav-item" data-page="server"><i class="ico ico-cloud"></i><span>Сервер</span></button>
+      <button class="nav-item" data-page="machine"><i class="ico ico-pc"></i><span>Энэ машин</span></button>
+      <div class="nav-label">Эх сурвалж</div>
+      <button class="nav-item" data-page="eventlog"><i class="ico ico-evt"></i><span>Event Log</span></button>
+      <button class="nav-item" data-page="services"><i class="ico ico-svc"></i><span>Үйлчилгээ</span><span class="pill" id="count-services">0</span></button>
+      <button class="nav-item" data-page="logfiles"><i class="ico ico-log"></i><span>Лог файл</span><span class="pill" id="count-logs">0</span></button>
+      <button class="nav-item" data-page="health"><i class="ico ico-hp"></i><span>Эрүүл мэнд</span></button>
+      <div class="nav-label">Хэрэгсэл</div>
+      <button class="nav-item" data-page="logview"><i class="ico ico-doc"></i><span>Бүртгэл</span></button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button class="theme-toggle" id="theme-toggle" title="Дэлгэцийн горим"><i class="ico ico-theme"></i><span>Горим</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h2 id="page-title">Тойм</h2>
+        <div class="crumb" id="page-sub">Үйлчилгээний төлөв ба удирдлага</div>
+      </div>
+      <div class="topbar-right">
+        <div class="status-pill" id="status-pill"><span class="dot"></span><span id="status-text">Шалгаж байна…</span></div>
+        <button class="btn primary" id="save-btn" disabled>Хадгалах</button>
+      </div>
+    </header>
+
+    <div class="scroll">
+      <!-- overview -->
+      <section class="page active" data-page="overview">
+        <div class="card hero">
+          <div class="hero-left">
+            <div class="hero-state" id="hero-state">—</div>
+            <div class="hero-sub" id="hero-sub">Windows үйлчилгээ</div>
+          </div>
+          <div class="hero-actions">
+            <button class="btn primary" data-svc="install">Үйлчилгээ суулгах</button>
+            <button class="btn success" data-svc="start">Асаах</button>
+            <button class="btn" data-svc="stop">Унтраах</button>
+            <button class="btn danger ghost" data-svc="uninstall">Устгах</button>
+          </div>
+        </div>
+
+        <div class="grid-3">
+          <div class="card stat"><span>Сервер</span><b data-text="server.url" class="mono truncate">—</b></div>
+          <div class="card stat"><span>Агент</span><b data-text="agent.name" class="truncate">—</b></div>
+          <div class="card stat"><span>Систем</span><b data-text="os" class="truncate">—</b></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Хянаж буй зүйлс</h3>
+            <ul class="watch-list" id="watch-list"></ul>
+          </div>
+          <div class="card">
+            <h3>Туршилт</h3>
+            <p class="muted">Нэг удаагийн цуглуулалт хийж, юу олдсоныг харуулна. Серверлүү юу ч илгээхгүй.</p>
+            <button class="btn" id="test-btn">Туршилт ажиллуулах</button>
+            <pre class="report" id="test-out" hidden></pre>
+          </div>
+        </div>
+
+        <div class="card paths">
+          <div><span>config.toml</span><code data-text="configPath"></code></div>
+          <div><span>Бүртгэл</span><code data-text="logPath"></code></div>
+        </div>
+      </section>
+
+      <!-- server -->
+      <section class="page" data-page="server">
+        <div class="card">
+          <h3>Холболт</h3>
+          <label class="field"><span>udirdlagaBack хаяг</span><input type="text" data-bind="server.url" placeholder="https://admin.zevtabs.mn/api" /></label>
+          <label class="field"><span>Token</span><input type="password" data-bind="server.token" placeholder="хоосон = токенгүй" /></label>
+        </div>
+        <div class="card">
+          <h3>Илгээлт</h3>
+          <div class="field-row">
+            <label class="field"><span>Timeout (сек)</span><input type="number" min="1" max="300" data-bind="server.timeout_secs" /></label>
+            <label class="field"><span>Дахин оролдлого</span><input type="number" min="0" max="20" data-bind="server.retry_count" /></label>
+          </div>
+          <div class="field-row">
+            <label class="field"><span>Багц хэмжээ</span><input type="number" min="1" max="1000" data-bind="server.batch_size" /></label>
+            <label class="field"><span>Илгээх давтамж (сек)</span><input type="number" min="5" max="600" data-bind="server.send_interval_secs" /></label>
+          </div>
+          <label class="field"><span>Офлайн дараалал (дээд)</span><input type="number" min="100" max="100000" data-bind="server.queue_max" /><small>Сүлжээ тасарсан үед дискэнд хадгалах эвентийн тоо.</small></label>
+        </div>
+      </section>
+
+      <!-- machine -->
+      <section class="page" data-page="machine">
+        <div class="card">
+          <h3>Таних тэмдэг</h3>
+          <label class="field"><span>Агентын нэр</span><input type="text" data-bind="agent.name" /><small>Хоосон бол Windows компьютерийн нэр.</small></label>
+          <div class="field-row">
+            <label class="field"><span>Байгууллагын ID</span><input type="text" data-bind="agent.baiguullagiinId" /></label>
+            <label class="field"><span>Байгууллагын нэр</span><input type="text" data-bind="agent.baiguullagiinNer" /></label>
+          </div>
+          <label class="field"><span>Барилгын ID</span><input type="text" data-bind="agent.barilgiinId" /></label>
+          <label class="field"><span>Heartbeat давтамж (сек)</span><input type="number" min="30" max="3600" data-bind="agent.heartbeat_interval_secs" /><small>Энэ дохио тасрахад машин "Offline" болж харагдана.</small></label>
+        </div>
+      </section>
+
+      <!-- event log -->
+      <section class="page" data-page="eventlog">
+        <div class="card">
+          <label class="toggle big"><input type="checkbox" data-bind="eventlog.enabled" /><span class="sw"></span><div><b>Windows Event Log хянах</b><small>Critical / Error / Warning бичлэгүүд</small></div></label>
+          <div class="field-row">
+            <label class="field"><span>Шалгах давтамж (сек)</span><input type="number" min="5" max="600" data-bind="eventlog.poll_interval_secs" /></label>
+            <label class="field"><span>Нэг удаад дээд тал нь</span><input type="number" min="10" max="5000" data-bind="eventlog.max_per_poll" /></label>
+          </div>
+          <label class="field"><span>Хамгийн бага түвшин</span>
+            <select data-bind="eventlog.max_level">
+              <option value="1">1 — зөвхөн Critical</option>
+              <option value="2">2 — Critical + Error</option>
+              <option value="3">3 — Critical + Error + Warning</option>
+              <option value="4">4 — бүгд (Information хүртэл)</option>
+            </select>
+            <small>Эхлээд 3-аар эхлээд, чимээ шуугиантай эх сурвалжийг доор дараарай.</small>
+          </label>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Сувгууд</h3>
+            <textarea data-bind="eventlog.channels" data-list rows="4" placeholder="System&#10;Application"></textarea>
+            <small class="muted">Мөр тутамд нэг.</small>
+          </div>
+          <div class="card">
+            <h3>Providers</h3>
+            <textarea data-bind="eventlog.providers" data-list rows="4" placeholder="Хоосон = бүгд"></textarea>
+            <small class="muted">Зөвхөн эдгээрийг авна. Хоосон бол бүгдийг.</small>
+          </div>
+          <div class="card">
+            <h3>Үл тоох Event ID</h3>
+            <textarea data-bind="eventlog.ignore_event_ids" data-list data-numeric rows="4" placeholder="10016"></textarea>
+            <small class="muted">10016 бол DCOM-ийн ердийн чимээ.</small>
+          </div>
+          <div class="card">
+            <h3>Үл тоох текст</h3>
+            <textarea data-bind="eventlog.ignore_contains" data-list rows="4"></textarea>
+            <small class="muted">Мессежид агуулагдвал алгасана.</small>
+          </div>
+        </div>
+      </section>
+
+      <!-- services -->
+      <section class="page" data-page="services">
+        <div class="card">
+          <h3>Хянах Windows үйлчилгээ</h3>
+          <p class="muted">Нэр нь Service Control Manager-ийн түлхүүр байх ёстой (харагдах нэр биш). <code>sc query</code> эсвэл Services.msc → Properties дээрээс хараарай.</p>
+        </div>
+        <div id="services-list" class="list"></div>
+        <button class="btn dashed" id="add-service">+ Үйлчилгээ нэмэх</button>
+      </section>
+
+      <!-- log files -->
+      <section class="page" data-page="logfiles">
+        <div class="card">
+          <label class="toggle big"><input type="checkbox" data-bind="logs.enabled" /><span class="sw"></span><div><b>Лог файл хянах</b><small>Мөр нэмэгдэх бүрд шалгана</small></div></label>
+          <label class="field"><span>Шалгах давтамж (сек)</span><input type="number" min="5" max="600" data-bind="logs.poll_interval_secs" /></label>
+        </div>
+        <div id="logs-list" class="list"></div>
+        <button class="btn dashed" id="add-log">+ Лог файл нэмэх</button>
+      </section>
+
+      <!-- health -->
+      <section class="page" data-page="health">
+        <div class="card">
+          <label class="toggle big"><input type="checkbox" data-bind="health.enabled" /><span class="sw"></span><div><b>Эрүүл мэнд хянах</b><small>CPU, RAM, диск ба HTTP шалгалт</small></div></label>
+          <label class="field"><span>Шалгах давтамж (сек)</span><input type="number" min="10" max="600" data-bind="health.poll_interval_secs" /></label>
+          <label class="field slider"><span>CPU босго<em><b data-out="health.cpu_threshold">90</b>%</em></span><input type="range" min="0" max="100" data-bind="health.cpu_threshold" /></label>
+          <label class="field slider"><span>RAM босго<em><b data-out="health.mem_threshold">90</b>%</em></span><input type="range" min="0" max="100" data-bind="health.mem_threshold" /></label>
+          <label class="field slider"><span>Диск босго<em><b data-out="health.disk_threshold">90</b>%</em></span><input type="range" min="0" max="100" data-bind="health.disk_threshold" /></label>
+        </div>
+        <div class="card"><h3>HTTP шалгалт</h3><p class="muted">Хаяг тус бүрийг тогтмол дуудаж, хариу ирэхгүй бол мэдэгдэнэ.</p></div>
+        <div id="probes-list" class="list"></div>
+        <button class="btn dashed" id="add-probe">+ HTTP шалгалт нэмэх</button>
+      </section>
+
+      <!-- log viewer -->
+      <section class="page" data-page="logview">
+        <div class="card">
+          <div class="row-between">
+            <h3>zev-detector.log</h3>
+            <button class="btn" id="refresh-log">Сэргээх</button>
+          </div>
+          <pre class="report tall" id="log-out">…</pre>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div id="toasts" class="toasts"></div>
+
+<div id="busy" class="busy" hidden>
+  <div class="busy-card"><div class="spinner"></div><div id="busy-text">Ажиллаж байна…</div></div>
+</div>
+
+<template id="tpl-service">
+  <div class="card item">
+    <div class="item-head"><b class="item-title">Үйлчилгээ</b><button class="icon-btn remove" title="Устгах">×</button></div>
+    <div class="field-row">
+      <label class="field"><span>SCM нэр</span><input type="text" data-k="name" placeholder="DahuaParkingService" /></label>
+      <label class="field"><span>Харагдах нэр</span><input type="text" data-k="label" placeholder="хоосон = SCM нэр" /></label>
+    </div>
+    <label class="toggle"><input type="checkbox" data-k="must_run" /><span class="sw"></span><div><b>Ажиллахгүй бол Critical</b></div></label>
+  </div>
+</template>
+
+<template id="tpl-log">
+  <div class="card item">
+    <div class="item-head"><b class="item-title">Лог файл</b><button class="icon-btn remove" title="Устгах">×</button></div>
+    <label class="field"><span>Зам</span><div class="with-btn"><input type="text" data-k="path" placeholder="D:\…\service.log" /><button class="btn browse">Сонгох…</button></div></label>
+    <div class="field-row">
+      <label class="field"><span>Glob <i>(хавтас бол)</i></span><input type="text" data-k="glob" placeholder="*.log" /></label>
+      <label class="field"><span>Context мөр</span><input type="number" min="0" max="100" data-k="context_lines" /></label>
+    </div>
+    <div class="field-row">
+      <label class="field"><span>System</span><input type="text" data-k="system" placeholder="dahuarust" /></label>
+      <label class="field"><span>Модуль</span><input type="text" data-k="modul" placeholder="dahua-service" /></label>
+    </div>
+    <div class="field-row">
+      <label class="field"><span>Хайх загвар <i>(regex)</i></span><input type="text" data-k="pattern" placeholder="хоосон = [ERROR]/[WARN]/panicked" /></label>
+      <label class="field"><span>Үл тоох <i>(regex)</i></span><input type="text" data-k="ignore_pattern" /></label>
+    </div>
+  </div>
+</template>
+
+<template id="tpl-probe">
+  <div class="card item">
+    <div class="item-head"><b class="item-title">HTTP шалгалт</b><button class="icon-btn remove" title="Устгах">×</button></div>
+    <div class="field-row">
+      <label class="field"><span>Нэр</span><input type="text" data-k="name" placeholder="dahua api" /></label>
+      <label class="field"><span>System</span><input type="text" data-k="system" placeholder="dahuarust" /></label>
+    </div>
+    <label class="field"><span>URL</span><input type="text" data-k="url" placeholder="http://127.0.0.1:5000/api/health" /></label>
+    <div class="field-row">
+      <label class="field"><span>Хүлээх текст</span><input type="text" data-k="expect" placeholder="OK" /></label>
+      <label class="field"><span>Timeout (сек)</span><input type="number" min="1" max="60" data-k="timeout_secs" /></label>
+    </div>
+  </div>
+</template>
+
+<script src="mock.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
