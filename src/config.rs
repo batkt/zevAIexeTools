@@ -251,6 +251,7 @@ fn d_update_interval() -> u64 { 6 }
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ServerConfig {
     /// Base URL of udirdlagaBack, e.g. https://admin.zevtabs.mn/api
+    #[serde(default = "d_server_url")]
     pub url: String,
     /// Bearer token sent with every request (optional; empty = no header)
     #[serde(default)]
@@ -270,10 +271,14 @@ pub struct ServerConfig {
     pub queue_max: usize,
 }
 
+pub fn d_server_url() -> String {
+    "https://admin.zevtabs.mn/api".to_string()
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            url: String::new(),
+            url: d_server_url(),
             token: String::new(),
             timeout_secs: d_timeout(),
             retry_count: d_retry(),
@@ -594,8 +599,8 @@ impl Config {
         let mut cfg: Config = toml::from_str(&text)
             .map_err(|e| anyhow::anyhow!("config.toml parse error: {e}"))?;
 
-        if cfg.server.url.is_empty() {
-            anyhow::bail!("config.toml: [server].url is required");
+        if cfg.server.url.trim().is_empty() {
+            cfg.server.url = d_server_url();
         }
         while cfg.server.url.ends_with('/') {
             cfg.server.url.pop();

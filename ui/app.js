@@ -151,8 +151,117 @@ function renderList(container, tplId, items, onChange) {
   });
 }
 
-const renderServices = () =>
-  renderList($("#services-list"), "tpl-service", cfg.services, renderServices);
+let installedServices = [];
+
+async function loadInstalledServices() {
+  try {
+    installedServices = await invoke("list_installed_services");
+  } catch (err) {
+    console.warn("Could not list installed services:", err);
+    installedServices = [];
+  }
+}
+
+function renderServices() {
+  const container = $("#services-list");
+  container.textContent = "";
+
+  cfg.services.forEach((item, index) => {
+    const node = $("#tpl-service").content.firstElementChild.cloneNode(true);
+
+    const titleEl = $(".service-name-title", node);
+    if (titleEl) {
+      titleEl.textContent = item.label || item.name || "Шинэ үйлчилгээ";
+    }
+
+    const statusPill = $(".service-status-pill", node);
+    function updateStatusPill(st) {
+      if (!statusPill) return;
+      if (!st) {
+        const found = installedServices.find((s) => s.name.toLowerCase() === (item.name || "").toLowerCase());
+        st = found ? found.status : (item.name ? "Not Installed" : "");
+      }
+      if (!st) {
+        statusPill.hidden = true;
+      } else {
+        statusPill.hidden = false;
+        const isRunning = st === "Running";
+        statusPill.textContent = isRunning ? "Running (Ажиллаж байна)" : st;
+        statusPill.className = "service-status-pill " + (isRunning ? "running" : "stopped");
+      }
+    }
+    updateStatusPill();
+
+    const selectEl = $(".service-select", node);
+    if (selectEl) {
+      const options = [
+        `<option value="">-- Компьютер дээрх үйлчилгээнүүдээс сонгох (${installedServices.length}) --</option>`
+      ];
+      for (const s of installedServices) {
+        const selected = (s.name.toLowerCase() === (item.name || "").toLowerCase()) ? "selected" : "";
+        const icon = s.isParkingRelated ? "⭐ " : "";
+        options.push(
+          `<option value="${escapeHtml(s.name)}" data-label="${escapeHtml(s.displayName)}" data-status="${escapeHtml(s.status)}" ${selected}>` +
+          `${icon}${escapeHtml(s.displayName)} (${escapeHtml(s.name)}) [${escapeHtml(s.status)}]</option>`
+        );
+      }
+      selectEl.innerHTML = options.join("");
+
+      selectEl.addEventListener("change", () => {
+        const selectedOpt = selectEl.selectedOptions[0];
+        if (selectedOpt && selectedOpt.value) {
+          item.name = selectedOpt.value;
+          item.label = selectedOpt.dataset.label || selectedOpt.value;
+          $('[data-k="name"]', node).value = item.name;
+          $('[data-k="label"]', node).value = item.label;
+          if (titleEl) titleEl.textContent = item.label;
+          updateStatusPill(selectedOpt.dataset.status);
+          markDirty();
+        }
+      });
+    }
+
+    for (const input of $$("[data-k]", node)) {
+      const key = input.dataset.k;
+      if (input.type === "checkbox") input.checked = !!item[key];
+      else input.value = item[key] ?? "";
+
+      input.addEventListener("input", () => {
+        item[key] =
+          input.type === "checkbox" ? input.checked
+          : input.type === "number" ? Number(input.value) || 0
+          : input.value;
+        if (key === "name" || key === "label") {
+          if (titleEl) titleEl.textContent = item.label || item.name || "Шинэ үйлчилгээ";
+          updateStatusPill();
+        }
+        markDirty();
+      });
+    }
+
+    $(".remove", node).addEventListener("click", () => {
+      cfg.services.splice(index, 1);
+      renderServices();
+      markDirty();
+    });
+
+    container.appendChild(node);
+  });
+}
+
+function populateWizServices() {
+  const wizSelect = $("#wiz-service");
+  if (!wizSelect) return;
+  const curVal = wizSelect.value;
+  wizSelect.innerHTML =
+    `<option value="">-- Компьютер дээрх үйлчилгээнүүдээс сонгох (${installedServices.length}) --</option>` +
+    installedServices.map((s) => {
+      const icon = s.isParkingRelated ? "⭐ " : "";
+      return `<option value="${escapeHtml(s.name)}" data-label="${escapeHtml(s.displayName)}">${icon}${escapeHtml(s.displayName)} (${escapeHtml(s.name)}) [${escapeHtml(s.status)}]</option>`;
+    }).join("");
+  if (curVal) wizSelect.value = curVal;
+}
+
 const renderLogs = () =>
   renderList($("#logs-list"), "tpl-log", cfg.logs.files, renderLogs);
 const renderProbes = () =>
@@ -444,10 +553,9 @@ async function save() {
 // ─── navigation ──────────────────────────────────────────────────────────
 const PAGE_META = {
   overview: ["Тойм", "Үйлчилгээний төлөв ба удирдлага"],
-  server:   ["Сервер", "Хаана илгээх, ямар давтамжтай"],
-  machine:  ["Энэ машин", "Хяналтын самбарт хэрхэн харагдах"],
+  server:   ["Холболт", "udirdlagaBack хаяг ба таних тэмдэг"],
   eventlog: ["Event Log", "Windows-ийн үйл явдлын бүртгэл"],
-  services: ["Үйлчилгээ", "Хянах Windows үйлчилгээнүүд"],
+  services: ["Үйлчилгээ", "Компьютер дээрх Windows үйлчилгээнүүд"],
   dahuarust: ["Dahua Parking", "Dahua ALPR камер, хаалт болон API үйлчилгээний шууд хяналт"],
   logfiles: ["Лог файл", "Програмын лог мөрүүд"],
   health:   ["Эрүүл мэнд", "CPU, RAM, диск, порт ба сүлжээ"],
@@ -481,7 +589,7 @@ function applyTheme(theme) {
 }
 
 // ─── setup wizard ────────────────────────────────────────────────────────
-const WIZ_LAST = 4;
+const WIZ_LAST = 3;
 let wizStep = 0;
 
 function wizRender() {
@@ -496,9 +604,8 @@ function wizRender() {
 
   if (wizStep === WIZ_LAST) {
     const rows = [
-      ["Сервер", cfg.server.url || "—"],
+      ["Холболт", cfg.server.url || "https://admin.zevtabs.mn/api"],
       ["Агент", cfg.agent.name || info.hostname],
-      ["Байгууллага", cfg.agent.baiguullagiinNer || "—"],
       ["Хянах", [
         cfg.eventlog.enabled && "Event Log",
         cfg.logs.enabled && "лог файл",
@@ -521,16 +628,24 @@ function wizRender() {
 /** Blocks moving past a step whose required field is empty. */
 function wizValidate() {
   if (wizStep === 1 && !cfg.server.url.trim()) {
-    toast("Серверийн хаяг заавал шаардлагатай.", "err");
-    return false;
+    cfg.server.url = "https://admin.zevtabs.mn/api";
   }
   return true;
 }
 
 async function wizFinish() {
-  const name = $("#wiz-service").value.trim();
-  if (name && !cfg.services.some((s) => s.name === name)) {
-    cfg.services.push({ name, label: name, must_run: true });
+  const wizSelect = $("#wiz-service");
+  const name = wizSelect ? wizSelect.value.trim() : "";
+  if (name && !cfg.services.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+    const label = wizSelect.selectedOptions[0]?.dataset.label || name;
+    cfg.services.push({
+      name,
+      label,
+      must_run: true,
+      auto_restart: true,
+      max_restarts_per_hour: 3,
+      restart_grace_secs: 45,
+    });
   }
   busy(true, "Тохиргоог хадгалж байна…");
   const ok = await save();
@@ -567,12 +682,15 @@ async function boot() {
   cfg = await invoke("load_config");
   saved = JSON.stringify(cfg);
 
+  await loadInstalledServices();
+
   // A machine with no config.toml has never been set up — walk the operator
   // through it instead of dropping them into a settings screen.
   const firstRun = !info.configExists;
   if (firstRun && !cfg.server.url) cfg.server.url = "https://admin.zevtabs.mn/api";
 
   renderBindings();
+  populateWizServices();
 
   if (firstRun) {
     $("#wizard").hidden = false;
@@ -619,6 +737,15 @@ $("#dh-copy-logs")?.addEventListener("click", () => {
   }).catch(() => {
     toast("Хуулахад алдаа гарлаа.", "err");
   });
+});
+
+$("#refresh-installed-services")?.addEventListener("click", async () => {
+  busy(true, "Үйлчилгээнүүдийг шинэчлэн шалгаж байна…");
+  await loadInstalledServices();
+  busy(false);
+  renderServices();
+  populateWizServices();
+  toast(`${installedServices.length} үйлчилгээ олдлоо.`, "ok");
 });
 
 $("#save-btn").addEventListener("click", save);

@@ -60,16 +60,29 @@ $DistDir = Join-Path $AgentRoot "dist"
 $StandaloneDir = Join-Path $DistDir "Zev-Detector-v$Version-standalone"
 
 if (Test-Path $StandaloneDir) {
-    Stop-Process -Name "zev-detector-ui" -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 300
-    Remove-Item -Path $StandaloneDir -Recurse -Force
+    Stop-Service -Name "ZevDetector" -Force -ErrorAction SilentlyContinue
+    Stop-Process -Name "zev-detector", "zev-detector-ui" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 800
+    try {
+        Remove-Item -Path $StandaloneDir -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Warning "Could not clean entire ${StandaloneDir}: $_"
+    }
 }
 New-Item -ItemType Directory -Path $StandaloneDir -Force | Out-Null
 
-Copy-Item $DetectorExe -Destination $StandaloneDir -Force
-Copy-Item $UiExe -Destination $StandaloneDir -Force
-Copy-Item (Join-Path $AgentRoot "config.sample.toml") -Destination (Join-Path $StandaloneDir "config.sample.toml") -Force
-Copy-Item (Join-Path $AgentRoot "README.md") -Destination (Join-Path $StandaloneDir "README.md") -Force
+try {
+    Copy-Item $DetectorExe -Destination $StandaloneDir -Force -ErrorAction Stop
+} catch {
+    Write-Warning "zev-detector.exe in standalone dir is locked by active service. Proceeding with installer build."
+}
+try {
+    Copy-Item $UiExe -Destination $StandaloneDir -Force -ErrorAction Stop
+} catch {
+    Write-Warning "zev-detector-ui.exe in standalone dir could not be replaced: $_"
+}
+Copy-Item (Join-Path $AgentRoot "config.sample.toml") -Destination (Join-Path $StandaloneDir "config.sample.toml") -Force -ErrorAction SilentlyContinue
+Copy-Item (Join-Path $AgentRoot "README.md") -Destination (Join-Path $StandaloneDir "README.md") -Force -ErrorAction SilentlyContinue
 
 # Helper batch generator
 $ElevateLines = @(

@@ -941,3 +941,40 @@ input[type="range"]::-webkit-slider-thumb {
   border: 1px solid var(--border);
 }
 
+.service-head-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.service-badge-icon {
+  font-size: 20px;
+}
+.service-status-pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  margin-left: 8px;
+}
+.service-status-pill.running {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.service-status-pill.stopped {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.service-select {
+  font-weight: 500;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: var(--text-1);
+}
+

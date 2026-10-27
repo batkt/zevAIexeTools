@@ -47,6 +47,9 @@ fn agent_info() -> AgentInfo {
 #[tauri::command]
 fn load_config() -> Config {
     let mut cfg = Config::load_or_default();
+    if cfg.server.url.trim().is_empty() {
+        cfg.server.url = config::d_server_url();
+    }
     // A blank name means "use this machine's hostname" to the service; show
     // the resolved value rather than an empty box the user has to guess at.
     if cfg.agent.name.is_empty() {
@@ -58,7 +61,7 @@ fn load_config() -> Config {
 #[tauri::command]
 fn save_config(mut cfg: Config) -> Result<(), String> {
     if cfg.server.url.trim().is_empty() {
-        return Err("Server URL is required.".into());
+        cfg.server.url = config::d_server_url();
     }
     cfg.server.url = cfg.server.url.trim().trim_end_matches('/').to_string();
     if cfg.agent.name.trim().is_empty() {
@@ -187,6 +190,94 @@ async fn dahua_action(action: String) -> Result<String, String> {
     }
 }
 
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledServiceInfo {
+    pub name: String,
+    pub display_name: String,
+    pub status: String,
+    pub is_parking_related: bool,
+}
+
+#[tauri::command]
+async fn list_installed_services() -> Vec<InstalledServiceInfo> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let output = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-Service | Select-Object -Property Name, DisplayName, Status | ConvertTo-Json -Compress",
+            ])
+            .output();
+
+        if let Ok(out) = output {
+            if out.status.success() {
+                #[derive(serde::Deserialize)]
+                struct RawSvc {
+                    #[serde(rename = "Name")]
+                    name: Option<String>,
+                    #[serde(rename = "DisplayName")]
+                    display_name: Option<String>,
+                    #[serde(rename = "Status")]
+                    status: Option<serde_json::Value>,
+                }
+
+                if let Ok(list) = serde_json::from_slice::<Vec<RawSvc>>(&out.stdout) {
+                    let mut result: Vec<InstalledServiceInfo> = list
+                        .into_iter()
+                        .filter_map(|s| {
+                            let name = s.name?;
+                            let display_name = s.display_name.unwrap_or_else(|| name.clone());
+                            let status = match s.status {
+                                Some(serde_json::Value::Number(n)) => {
+                                    if n.as_i64() == Some(4) {
+                                        "Running".to_string()
+                                    } else {
+                                        "Stopped".to_string()
+                                    }
+                                }
+                                Some(serde_json::Value::String(s)) => s,
+                                _ => "Unknown".to_string(),
+                            };
+                            let lower_name = name.to_lowercase();
+                            let lower_disp = display_name.to_lowercase();
+                            let is_parking_related = lower_name.contains("dahua")
+                                || lower_name.contains("parking")
+                                || lower_name.contains("zev")
+                                || lower_name.contains("camera")
+                                || lower_disp.contains("dahua")
+                                || lower_disp.contains("parking")
+                                || lower_disp.contains("zev")
+                                || lower_disp.contains("camera");
+
+                            Some(InstalledServiceInfo {
+                                name,
+                                display_name,
+                                status,
+                                is_parking_related,
+                            })
+                        })
+                        .collect();
+
+                    // Sort: parking related first, then alphabetically by display_name
+                    result.sort_by(|a, b| {
+                        match (b.is_parking_related, a.is_parking_related) {
+                            (true, false) => std::cmp::Ordering::Less,
+                            (false, true) => std::cmp::Ordering::Greater,
+                            _ => a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()),
+                        }
+                    });
+
+                    return result;
+                }
+            }
+        }
+        Vec::new()
+    })
+    .await
+    .unwrap_or_default()
+}
+
 /// Brings the main window back from the tray.
 fn show_main_window(app: &tauri::AppHandle) {
     use tauri::Manager;
@@ -215,6 +306,7 @@ fn main() {
             get_active_alerts,
             dahua_status,
             dahua_action,
+            list_installed_services,
         ])
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Нээх", true, None::<&str>)?;

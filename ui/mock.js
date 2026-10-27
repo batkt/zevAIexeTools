@@ -149,6 +149,15 @@ if (!window.__TAURI__) {
         "[2026-08-18 09:04:41] [WARN] Health: disk C:\\ at 98%",
         "[2026-08-18 09:05:11] [INFO] Sent 3 event(s)",
       ].join("\n"),
+    list_installed_services: () => [
+      { name: "DahuaParkingService", displayName: "zevDahuaRust", status: "Running", isParkingRelated: true },
+      { name: "ParkingService", displayName: "zevzogsoolrust", status: "Running", isParkingRelated: true },
+      { name: "zevdahua", displayName: "zevdahua", status: "Running", isParkingRelated: true },
+      { name: "zevstream", displayName: "zevstream", status: "Running", isParkingRelated: true },
+      { name: "ZevDetector", displayName: "Zev Detector", status: "Running", isParkingRelated: true },
+      { name: "Spooler", displayName: "Print Spooler", status: "Running", isParkingRelated: false },
+      { name: "W32Time", displayName: "Windows Time", status: "Stopped", isParkingRelated: false },
+    ],
   };
 
   window.__TAURI__ = {
