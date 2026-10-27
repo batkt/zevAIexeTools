@@ -137,6 +137,7 @@
       <div class="nav-label">Эх сурвалж</div>
       <button class="nav-item" data-page="eventlog"><i class="ico ico-evt"></i><span>Event Log</span></button>
       <button class="nav-item" data-page="services"><i class="ico ico-svc"></i><span>Үйлчилгээ</span><span class="pill" id="count-services">0</span></button>
+      <button class="nav-item" data-page="dahuarust"><i class="ico ico-svc"></i><span>Dahua Parking</span><span class="pill" id="dahua-sidebar-pill">…</span></button>
       <button class="nav-item" data-page="logfiles"><i class="ico ico-log"></i><span>Лог файл</span><span class="pill" id="count-logs">0</span></button>
       <button class="nav-item" data-page="health"><i class="ico ico-hp"></i><span>Эрүүл мэнд</span></button>
       <div class="nav-label">Арчилгаа</div>
@@ -163,6 +164,17 @@
       </div>
     </header>
 
+    <div id="local-alert-banner" class="local-alert-banner" hidden>
+      <div class="alert-left">
+        <div class="alert-icon" id="alert-icon">⚠️</div>
+        <div class="alert-text">
+          <div class="alert-title" id="alert-title">Анхааруулга</div>
+          <div class="alert-msg" id="alert-msg">Алдааны тайлбар</div>
+        </div>
+      </div>
+      <button class="alert-details-btn" id="alert-details-btn">Шалгах / Дэлгэрэнгүй</button>
+    </div>
+
     <div class="scroll">
       <!-- overview -->
       <section class="page active" data-page="overview">
@@ -183,6 +195,26 @@
           <div class="card stat"><span>Сервер</span><b data-text="server.url" class="mono truncate">—</b></div>
           <div class="card stat"><span>Агент</span><b data-text="agent.name" class="truncate">—</b></div>
           <div class="card stat"><span>Систем</span><b data-text="os" class="truncate">—</b></div>
+        </div>
+
+        <div class="card dahua-summary-card" id="ov-dahua-card">
+          <div class="dahua-summary-header">
+            <div class="dahua-summary-title">
+              <span class="dahua-icon">🚗</span>
+              <div>
+                <b>Dahua Parking Service (dahuarust)</b>
+                <span class="muted" id="ov-dahua-sub">Зогсоолын камер, хаалт болон API үйлчилгээ</span>
+              </div>
+            </div>
+            <div class="dahua-badges">
+              <span class="dahua-pill" id="ov-dahua-state-badge">Шалгаж байна…</span>
+              <span class="dahua-pill sub" id="ov-dahua-port5000">Port 5000: …</span>
+              <button class="btn small" id="ov-dahua-open-btn">Дэлгэрэнгүй ➔</button>
+            </div>
+          </div>
+          <div class="dahua-quick-log">
+            <span class="muted">Сүүлийн бичлэг:</span> <code id="ov-dahua-log-text">Уншиж байна…</code>
+          </div>
         </div>
 
         <div class="grid-2">
@@ -403,6 +435,78 @@
           <pre class="report tall" id="log-out">…</pre>
         </div>
       </section>
+
+      <!-- dahuarust live monitor -->
+      <section class="page" data-page="dahuarust">
+        <div class="card dahua-hero">
+          <div class="dahua-hero-top">
+            <div>
+              <div class="dahua-service-title" id="dh-svc-title">DahuaParkingService</div>
+              <div class="dahua-service-sub" id="dh-svc-sub">Dahua ALPR камер, хаалт ба API серверийн шууд хяналт</div>
+            </div>
+            <div class="dahua-state-pill" id="dh-state-pill">
+              <span class="dot"></span>
+              <span id="dh-state-text">Шалгаж байна…</span>
+            </div>
+          </div>
+          <div class="dahua-actions">
+            <button class="btn success" id="dh-btn-start">Асаах (Start)</button>
+            <button class="btn" id="dh-btn-stop">Зогсоох (Stop)</button>
+            <button class="btn warning" id="dh-btn-restart">Дахин ачаалах (Restart)</button>
+            <div class="spacer"></div>
+            <button class="btn" id="dh-btn-refresh">Шинэчлэх ⟳</button>
+          </div>
+        </div>
+
+        <div class="grid-4">
+          <div class="card stat">
+            <span>Үйлчилгээний төлөв / PID</span>
+            <b id="dh-stat-pid" class="truncate">—</b>
+          </div>
+          <div class="card stat">
+            <span>API Порт 5000</span>
+            <b id="dh-stat-port5000">—</b>
+          </div>
+          <div class="card stat">
+            <span>NetSDK Порт 37777</span>
+            <b id="dh-stat-port37777">—</b>
+          </div>
+          <div class="card stat">
+            <span>Сүүлийн шалгалт</span>
+            <b id="dh-stat-updated" class="truncate">—</b>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row-between">
+            <div>
+              <h3>Сүүлийн 10 бичлэг (FIFO Ring Buffer)</h3>
+              <p class="muted">Хамгийн сүүлийн 10 бичлэгийг тогтмол хадгалж, шинэ бичлэг бүрт хуучныг хасан шинэчилдэг шууд лог.</p>
+            </div>
+            <div class="dahua-log-controls">
+              <label class="toggle-compact"><input type="checkbox" id="dh-auto-refresh" checked /><span class="sw"></span><span>2с Авто</span></label>
+              <button class="btn small" id="dh-copy-logs">Хуулах</button>
+            </div>
+          </div>
+
+          <div class="dahua-terminal-wrap">
+            <div class="dahua-terminal-head">
+              <span class="col-num">#</span>
+              <span class="col-time">Цаг</span>
+              <span class="col-level">Түвшин</span>
+              <span class="col-msg">Мэдээлэл / Мессеж</span>
+            </div>
+            <div class="dahua-terminal-body" id="dh-log-rows">
+              <div class="terminal-empty">Лог уншиж байна…</div>
+            </div>
+          </div>
+
+          <div class="log-path-footer">
+            <span>Файлын зам:</span>
+            <code id="dh-log-path">—</code>
+          </div>
+        </div>
+      </section>
     </div>
   </main>
 </div>
@@ -478,6 +582,22 @@
     </div>
   </div>
 </template>
+
+<!-- Alert Modal -->
+<div id="alert-modal" class="alert-modal-overlay" hidden>
+  <div class="alert-modal-card">
+    <div class="alert-modal-head">
+      <h3><span>🚨</span> <span>Системийн онцгой анхааруулга</span></h3>
+      <button class="icon-btn" id="alert-modal-close" style="font-size:18px">✕</button>
+    </div>
+    <div class="alert-modal-body" id="alert-modal-body">
+      <!-- Injected by app.js -->
+    </div>
+    <div class="alert-modal-foot">
+      <button class="btn primary" id="alert-modal-ok">Ойлголоо</button>
+    </div>
+  </div>
+</div>
 
 <script src="mock.js"></script>
 <script src="app.js"></script>

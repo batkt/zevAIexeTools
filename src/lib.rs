@@ -16,9 +16,9 @@
 //! This crate builds two binaries on top of these modules:
 //!
 //!   * `zev-detector.exe`     — the headless agent: the Windows service
-//!                              itself plus its install/start/stop CLI.
+//!     itself plus its install/start/stop CLI.
 //!   * `zev-detector-ui.exe`  — the desktop app people actually open, which
-//!                              edits config.toml and drives the service.
+//!     edits config.toml and drives the service.
 //!
 //! Keeping them separate means the service binary the SCM launches stays a
 //! plain console program with no window, no WebView and no GUI dependencies,
@@ -26,6 +26,7 @@
 
 pub mod cleanup;
 pub mod config;
+pub mod dahua_monitor;
 pub mod diag;
 pub mod elevate;
 pub mod event;
@@ -34,6 +35,7 @@ pub mod heal;
 pub mod health;
 pub mod logwatch;
 pub mod netqual;
+pub mod notify;
 pub mod ports;
 pub mod runner;
 pub mod sender;

@@ -138,6 +138,21 @@ label = "Dahua SDK"
 port  = 5000
 label = "Parking service"
 
+# ─── 10. Дотоод сануулга / Local Alerting ────────────────────────────────────
+# Компьютер дээр сууж буй ажилтанд (харуул, оператор) дэлгэц дээр нь шууд
+# сүлжээ тасрах, камер саатах, диск дүүрэх үед харагдахуйц анхааруулга гаргана.
+# - popup_enabled: Дэлгэц дээр анхааруулга цонх шууд гаргана (WTSSendMessage)
+# - toast_enabled: Windows мэдэгдлийн хэсэгт (Action Center) харуулна
+# - sound_enabled: Чухал алдааны үед дохио дуугаргана
+[notify]
+enabled           = true
+popup_enabled     = true
+toast_enabled     = true
+sound_enabled     = true
+netqual_threshold = 70      # Сүлжээний чанар 70%-иас доош орвол сануулна
+disk_threshold    = 90.0    # Диск 90%-иас их дүүрвэл анхааруулна
+cooldown_mins     = 15      # Нэг асуудлыг 15 минутад нэгээс олон удаа сануулахгүй
+
 # [[ports]]
 # port        = 554
 # label       = "RTSP"

@@ -51,6 +51,21 @@ impl NetQualCollector {
         self.last.clone()
     }
 
+    pub fn last_metrics(&self) -> (Option<u8>, Option<u64>, Option<f32>) {
+        let score = self
+            .last
+            .get("score")
+            .and_then(|v| v.as_u64())
+            .map(|s| s as u8);
+        let lat = self.last.get("latencyMs").and_then(|v| v.as_u64());
+        let loss = self
+            .last
+            .get("lossPercent")
+            .and_then(|v| v.as_f64())
+            .map(|l| l as f32);
+        (score, lat, loss)
+    }
+
     /// `disconnects` is owned by the sender, which is the only thing that knows
     /// whether uploads are actually landing.
     pub async fn poll(&mut self, disconnects: u64) -> Vec<DetectorEvent> {

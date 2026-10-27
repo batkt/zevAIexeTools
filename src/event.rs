@@ -143,10 +143,8 @@ impl DetectorEvent {
 /// fingerprint instead of flooding the dashboard.
 pub fn normalize(msg: &str) -> String {
     let mut out = String::with_capacity(msg.len());
-    let mut chars = msg.chars().peekable();
     let mut in_num = false;
-
-    while let Some(c) = chars.next() {
+    for c in msg.chars() {
         if c.is_ascii_digit() {
             if !in_num {
                 out.push('#');

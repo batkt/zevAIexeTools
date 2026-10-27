@@ -56,6 +56,8 @@ struct Heartbeat<'a> {
     ports: Vec<serde_json::Value>,
     #[serde(rename = "tsag", skip_serializing_if = "serde_json::Value::is_null")]
     clock: serde_json::Value,
+    #[serde(skip_serializing_if = "serde_json::Value::is_null")]
+    dahua: serde_json::Value,
 }
 
 /// Everything the heartbeat carries besides identity. Grouped rather than
@@ -69,6 +71,7 @@ pub struct HeartbeatData {
     pub network: serde_json::Value,
     pub ports: Vec<serde_json::Value>,
     pub clock: serde_json::Value,
+    pub dahua: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -240,7 +243,7 @@ impl Sender {
 
     /// Sends the heartbeat and returns whatever commands came back with it.
     pub async fn heartbeat(&self, data: HeartbeatData) -> Vec<Tushaal> {
-        let HeartbeatData { services, health, heals, network, ports, clock } = data;
+        let HeartbeatData { services, health, heals, network, ports, clock, dahua } = data;
         let url = format!("{}/detector/heartbeat", self.server.url);
         let body = Heartbeat {
             agent: &self.agent.name,
@@ -257,6 +260,7 @@ impl Sender {
             network,
             ports,
             clock,
+            dahua,
         };
         match self.post(&url, &body).await {
             Ok(text) => match serde_json::from_str::<HeartbeatKhariu>(&text) {

@@ -38,6 +38,25 @@ impl PortCollector {
         self.last.clone()
     }
 
+    pub fn closed_ports(&self) -> Vec<(u16, String)> {
+        self.last
+            .iter()
+            .filter(|v| {
+                v.get("open").and_then(|o| o.as_bool()) == Some(false)
+                    && v.get("mustListen").and_then(|m| m.as_bool()).unwrap_or(true)
+            })
+            .filter_map(|v| {
+                let port = v.get("port").and_then(|p| p.as_u64())? as u16;
+                let label = v
+                    .get("label")
+                    .and_then(|l| l.as_str())
+                    .unwrap_or("port")
+                    .to_string();
+                Some((port, label))
+            })
+            .collect()
+    }
+
     pub async fn poll(&mut self) -> Vec<DetectorEvent> {
         if self.entries.is_empty() {
             return Vec::new();
@@ -139,7 +158,7 @@ impl PortCollector {
     }
 }
 
-fn is_open(host: &str, port: u16) -> bool {
+pub fn is_open(host: &str, port: u16) -> bool {
     match (host, port).to_socket_addrs() {
         Ok(mut addrs) => addrs.any(|a| TcpStream::connect_timeout(&a, CONNECT_TIMEOUT).is_ok()),
         Err(_) => false,

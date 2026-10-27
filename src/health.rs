@@ -82,6 +82,24 @@ impl HealthCollector {
             .unwrap_or(0.0)
     }
 
+    pub fn worst_disk_info(&self) -> (f32, String, f32) {
+        let mut worst_pct = 0.0f32;
+        let mut worst_mount = String::new();
+        let mut worst_free = 0.0f32;
+
+        if let Some(disks) = self.last_snapshot.get("disks").and_then(|d| d.as_array()) {
+            for d in disks {
+                let pct = d.get("usedPercent").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                if pct >= worst_pct {
+                    worst_pct = pct;
+                    worst_mount = d.get("mount").and_then(|m| m.as_str()).unwrap_or("").to_string();
+                    worst_free = d.get("freeGb").and_then(|f| f.as_f64()).unwrap_or(0.0) as f32;
+                }
+            }
+        }
+        (worst_pct, worst_mount, worst_free)
+    }
+
     /// Returns Some(event) when the key's state changed or the reminder is due.
     fn edge(
         &mut self,

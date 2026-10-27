@@ -68,7 +68,7 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
     let parse = |s: &str| -> Vec<u64> {
         s.trim()
             .trim_start_matches('v')
-            .split(|c: char| c == '.' || c == '-' || c == '+')
+            .split(['.', '-', '+'])
             .map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>())
             .take_while(|p| !p.is_empty())
             .filter_map(|p| p.parse().ok())

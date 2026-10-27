@@ -39,11 +39,47 @@ fn main() {
         Some("start") => winsvc::control(true),
         Some("stop") => winsvc::control(false),
         Some("status") => winsvc::status(),
+        Some("dahua-status") => print_dahua_status(),
+        Some("dahua-start") => {
+            if let Err(e) = zev_detector::dahua_monitor::start_dahua_service() {
+                eprintln!("Failed to start DahuaParkingService: {e}");
+                std::process::exit(1);
+            }
+            println!("DahuaParkingService start signal sent.");
+        }
+        Some("dahua-stop") => {
+            if let Err(e) = zev_detector::dahua_monitor::stop_dahua_service() {
+                eprintln!("Failed to stop DahuaParkingService: {e}");
+                std::process::exit(1);
+            }
+            println!("DahuaParkingService stop signal sent.");
+        }
+        Some("dahua-restart") => {
+            if let Err(e) = zev_detector::dahua_monitor::restart_dahua_service() {
+                eprintln!("Failed to restart DahuaParkingService: {e}");
+                std::process::exit(1);
+            }
+            println!("DahuaParkingService restart completed.");
+        }
         Some("run") => run_interactive(),
         Some("test") => run_test(),
         Some("--version") | Some("-v") => println!("zev-detector {}", sender::AGENT_VERSION),
         Some("help") | Some("--help") | Some("-h") => print_help(),
         _ => winsvc::dispatch(),
+    }
+}
+
+fn print_dahua_status() {
+    let s = zev_detector::dahua_monitor::get_dahua_status();
+    println!("Dahua Parking Service Status:");
+    println!("  Service:  {} ({})", s.service_name, s.display_name);
+    println!("  Active:   {} (State: {}, PID: {})", s.is_active, s.state, s.pid);
+    println!("  API 5000: {}", if s.api_port_5000_open { "OPEN" } else { "CLOSED" });
+    println!("  SDK 37777: {}", if s.netsdk_port_37777_open { "OPEN" } else { "CLOSED" });
+    println!("  Log path: {} (exists: {})", s.log_path, s.log_exists);
+    println!("  Recent 10 records (FIFO):");
+    for (i, rec) in s.recent_logs.iter().enumerate() {
+        println!("    [{}] [{}] [{}] {}", i + 1, rec.timestamp, rec.level, rec.message);
     }
 }
 

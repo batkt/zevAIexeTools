@@ -147,6 +147,44 @@ fn read_log(lines: usize) -> String {
     }
 }
 
+#[tauri::command]
+fn get_active_alerts() -> Vec<zev_detector::notify::ActiveAlert> {
+    let state_file = Config::data_dir().join("active_alerts.json");
+    if let Ok(text) = std::fs::read_to_string(&state_file) {
+        if let Ok(snapshot) = serde_json::from_str::<zev_detector::notify::AlertSnapshot>(&text) {
+            return snapshot.active_alerts;
+        }
+    }
+    Vec::new()
+}
+
+#[tauri::command]
+fn dahua_status() -> zev_detector::dahua_monitor::DahuaStatusSnapshot {
+    zev_detector::dahua_monitor::get_dahua_status()
+}
+
+#[tauri::command]
+async fn dahua_action(action: String) -> Result<String, String> {
+    let verb = match action.as_str() {
+        "start" => "dahua-start",
+        "stop" => "dahua-stop",
+        "restart" => "dahua-restart",
+        other => return Err(format!("Unknown action: {other}")),
+    };
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        elevate::run_elevated(&agent_exe(), verb).map(|code| (verb, code))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match result {
+        Ok((verb, 0)) => Ok(format!("Action `{verb}` completed.")),
+        Ok((verb, code)) => Err(format!("Action `{verb}` failed (exit code {code})")),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Brings the main window back from the tray.
 fn show_main_window(app: &tauri::AppHandle) {
     use tauri::Manager;
@@ -172,6 +210,9 @@ fn main() {
             run_test,
             pick_file,
             read_log,
+            get_active_alerts,
+            dahua_status,
+            dahua_action,
         ])
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Нээх", true, None::<&str>)?;

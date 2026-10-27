@@ -96,6 +96,16 @@ impl Healer {
         }
     }
 
+    pub fn last_limit_hit(&self) -> Option<&str> {
+        self.tracked.iter().find_map(|(name, t)| {
+            if matches!(t.phase, Phase::Exhausted) {
+                Some(name.as_str())
+            } else {
+                None
+            }
+        })
+    }
+
     /// Decides what to do about each watched service, given the states the
     /// service collector just observed. Returns the events to report.
     pub fn poll(&mut self, seen: &HashMap<String, Observed>) -> Vec<DetectorEvent> {

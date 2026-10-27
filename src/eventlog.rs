@@ -404,8 +404,8 @@ mod platform {
                     // Remaining handles in this batch are closed by the loop's
                     // Handle drops above; the ones not yet wrapped leak only
                     // until the result set closes, which is immediate here.
-                    for j in (i + 1)..returned as usize {
-                        unsafe { EvtClose(batch[j]) };
+                    for &h in &batch[(i + 1)..returned as usize] {
+                        unsafe { EvtClose(h) };
                     }
                     break 'outer;
                 }
@@ -521,8 +521,7 @@ mod platform {
             let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
             let text = String::from_utf16_lossy(&buf[..len]);
             let cleaned = text
-                .replace('\r', " ")
-                .replace('\n', " ")
+                .replace(['\r', '\n'], " ")
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");

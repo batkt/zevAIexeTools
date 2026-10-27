@@ -208,6 +208,69 @@ async function refreshStatus() {
   $('[data-svc="uninstall"]').disabled = !s.installed;
   $('[data-svc="start"]').disabled = !s.installed || running;
   $('[data-svc="stop"]').disabled = !s.installed || !running;
+
+  await checkActiveAlerts();
+}
+
+let currentActiveAlerts = [];
+
+async function checkActiveAlerts() {
+  try {
+    currentActiveAlerts = await invoke("get_active_alerts");
+    renderActiveAlerts();
+  } catch (err) {
+    // ignore
+  }
+}
+
+function renderActiveAlerts() {
+  const banner = $("#local-alert-banner");
+  if (!banner) return;
+
+  if (!currentActiveAlerts || currentActiveAlerts.length === 0) {
+    banner.hidden = true;
+    return;
+  }
+
+  banner.hidden = false;
+  const isCritical = currentActiveAlerts.some((a) => a.severity === "Critical");
+  banner.classList.toggle("critical", isCritical);
+
+  const top = currentActiveAlerts[0];
+  $("#alert-icon").textContent = isCritical ? "🚨" : "⚠️";
+  $("#alert-title").textContent = currentActiveAlerts.length > 1
+    ? `${top.title} (+${currentActiveAlerts.length - 1} анхааруулга)`
+    : top.title;
+  $("#alert-msg").textContent = top.message;
+}
+
+function showAlertModal() {
+  const modal = $("#alert-modal");
+  const body = $("#alert-modal-body");
+  if (!modal || !body) return;
+
+  body.innerHTML = "";
+  if (!currentActiveAlerts || currentActiveAlerts.length === 0) {
+    body.innerHTML = `<div style="text-align:center;color:var(--text-2);padding:20px;">Идэвхтэй асуудал илрээгүй. Бүх систем хэвийн байна.</div>`;
+  } else {
+    for (const a of currentActiveAlerts) {
+      const card = document.createElement("div");
+      const sevClass = (a.severity || "").toLowerCase();
+      card.className = `alert-item-card ${sevClass}`;
+      card.innerHTML = `
+        <div class="alert-item-title">${a.title}</div>
+        <div class="alert-item-msg">${a.message}</div>
+        <div class="alert-item-advice">💡 <b>Зөвлөмж:</b> ${a.advice}</div>
+      `;
+      body.appendChild(card);
+    }
+  }
+  modal.hidden = false;
+}
+
+function closeAlertModal() {
+  const modal = $("#alert-modal");
+  if (modal) modal.hidden = true;
 }
 
 async function serviceAction(action) {
@@ -225,6 +288,137 @@ async function serviceAction(action) {
   } finally {
     busy(false);
     await refreshStatus();
+  }
+}
+
+// ─── dahua parking service monitor ────────────────────────────────────────
+let latestDahuaSnapshot = null;
+let dahuaPollTimer = null;
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+async function refreshDahuaStatus() {
+  try {
+    const s = await invoke("dahua_status");
+    latestDahuaSnapshot = s;
+    renderDahuaUI(s);
+  } catch (err) {
+    console.error("Dahua status query error:", err);
+  }
+}
+
+function renderDahuaUI(s) {
+  if (!s) return;
+
+  // 1. Sidebar pill
+  const sidePill = $("#dahua-sidebar-pill");
+  if (sidePill) {
+    sidePill.textContent = s.isActive ? "Идэвхтэй" : "Зогссон";
+    sidePill.className = "pill " + (s.isActive ? "running" : "stopped");
+  }
+
+  // 2. Overview card
+  const ovBadge = $("#ov-dahua-state-badge");
+  if (ovBadge) {
+    ovBadge.textContent = s.isActive ? `Идэвхтэй (${s.state})` : `Зогссон (${s.state})`;
+    ovBadge.className = "dahua-pill " + (s.isActive ? "" : "stopped");
+  }
+  const ovPort = $("#ov-dahua-port5000");
+  if (ovPort) {
+    ovPort.textContent = `Port 5000: ${s.apiPort5000Open ? "Нээлттэй" : "Хаалттай"}`;
+    ovPort.style.color = s.apiPort5000Open ? "#10b981" : "#ef4444";
+  }
+  const ovLog = $("#ov-dahua-log-text");
+  if (ovLog) {
+    if (s.recentLogs && s.recentLogs.length > 0) {
+      const lastRec = s.recentLogs[s.recentLogs.length - 1];
+      ovLog.textContent = `[${lastRec.timestamp}] [${lastRec.level}] ${lastRec.message}`;
+    } else {
+      ovLog.textContent = "Лог бичлэг олдсонгүй";
+    }
+  }
+
+  // 3. Dahua dedicated page
+  const titleEl = $("#dh-svc-title");
+  if (titleEl) titleEl.textContent = `${s.serviceName} (${s.displayName})`;
+
+  const statePill = $("#dh-state-pill");
+  if (statePill) {
+    statePill.className = "dahua-state-pill " + (s.isActive ? "" : "stopped");
+    $("#dh-state-text").textContent = s.state || (s.isActive ? "Ажиллаж байна" : "Зогссон");
+  }
+
+  const pidEl = $("#dh-stat-pid");
+  if (pidEl) pidEl.textContent = s.pid ? `${s.state} · PID ${s.pid}` : s.state;
+
+  const p5000El = $("#dh-stat-port5000");
+  if (p5000El) {
+    p5000El.textContent = s.apiPort5000Open ? "Нээлттэй (Active)" : "Хаалттай (Closed)";
+    p5000El.style.color = s.apiPort5000Open ? "#10b981" : "#ef4444";
+  }
+
+  const p37777El = $("#dh-stat-port37777");
+  if (p37777El) {
+    p37777El.textContent = s.netsdkPort37777Open ? "Нээлттэй (Active)" : "Хаалттай (Closed)";
+    p37777El.style.color = s.netsdkPort37777Open ? "#10b981" : "var(--text-2)";
+  }
+
+  const updatedEl = $("#dh-stat-updated");
+  if (updatedEl) updatedEl.textContent = s.updatedAt || "—";
+
+  const logPathEl = $("#dh-log-path");
+  if (logPathEl) logPathEl.textContent = s.logPath + (s.logExists ? " (Байгаа)" : " (Файл үүсээгүй)");
+
+  // Render 10 records FIFO table
+  const rowsEl = $("#dh-log-rows");
+  if (rowsEl) {
+    if (!s.recentLogs || s.recentLogs.length === 0) {
+      rowsEl.innerHTML = `<div class="terminal-empty">Хадгалагдсан бичлэг алга байна (${s.logPath})</div>`;
+    } else {
+      rowsEl.innerHTML = s.recentLogs.map((r, idx) => {
+        const lvl = (r.level || "INFO").toLowerCase();
+        return `
+          <div class="dahua-terminal-row">
+            <span class="terminal-col-num">${idx + 1}</span>
+            <span class="terminal-col-time">${escapeHtml(r.timestamp)}</span>
+            <div><span class="terminal-level-badge ${lvl}">${escapeHtml(r.level)}</span></div>
+            <span class="terminal-col-msg">${escapeHtml(r.message)}</span>
+          </div>
+        `;
+      }).join("");
+    }
+  }
+
+  // Button disabled states
+  const btnStart = $("#dh-btn-start");
+  if (btnStart) btnStart.disabled = s.isActive;
+  const btnStop = $("#dh-btn-stop");
+  if (btnStop) btnStop.disabled = !s.isActive;
+}
+
+async function dahuaAction(action) {
+  const labels = {
+    start: "Dahua үйлчилгээг асааж байна…",
+    stop: "Dahua үйлчилгээг зогсоож байна…",
+    restart: "Dahua үйлчилгээг дахин ачаалж байна…",
+  };
+  busy(true, labels[action] || "Ажиллаж байна…");
+  try {
+    const res = await invoke("dahua_action", { action });
+    toast(res, "ok");
+  } catch (e) {
+    toast(String(e), "err");
+  } finally {
+    busy(false);
+    await refreshDahuaStatus();
   }
 }
 
@@ -249,6 +443,7 @@ const PAGE_META = {
   machine:  ["Энэ машин", "Хяналтын самбарт хэрхэн харагдах"],
   eventlog: ["Event Log", "Windows-ийн үйл явдлын бүртгэл"],
   services: ["Үйлчилгээ", "Хянах Windows үйлчилгээнүүд"],
+  dahuarust: ["Dahua Parking", "Dahua ALPR камер, хаалт болон API үйлчилгээний шууд хяналт"],
   logfiles: ["Лог файл", "Програмын лог мөрүүд"],
   health:   ["Эрүүл мэнд", "CPU, RAM, диск, порт ба сүлжээ"],
   maintenance: ["Цаг & цэвэрлэлт", "Цагийн зөрүү ба хуваарьт цэвэрлэлт"],
@@ -259,10 +454,11 @@ const PAGE_META = {
 function goto(page) {
   $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
   $$(".page").forEach((s) => s.classList.toggle("active", s.dataset.page === page));
-  const [title, sub] = PAGE_META[page];
+  const [title, sub] = PAGE_META[page] || [page, ""];
   $("#page-title").textContent = title;
   $("#page-sub").textContent = sub;
   if (page === "logview") loadLog();
+  if (page === "dahuarust" || page === "overview") refreshDahuaStatus();
 }
 
 async function loadLog() {
@@ -380,12 +576,45 @@ async function boot() {
     closeWizard();
   }
 
+  await refreshDahuaStatus();
   statusTimer = setInterval(refreshStatus, 4000);
+  dahuaPollTimer = setInterval(() => {
+    const auto = $("#dh-auto-refresh");
+    if (!auto || auto.checked) {
+      refreshDahuaStatus();
+    }
+  }, 2500);
 }
 
 // ─── events ──────────────────────────────────────────────────────────────
 $$(".nav-item").forEach((b) => b.addEventListener("click", () => goto(b.dataset.page)));
 $$("[data-svc]").forEach((b) => b.addEventListener("click", () => serviceAction(b.dataset.svc)));
+
+$("#dh-btn-start")?.addEventListener("click", () => dahuaAction("start"));
+$("#dh-btn-stop")?.addEventListener("click", () => dahuaAction("stop"));
+$("#dh-btn-restart")?.addEventListener("click", () => dahuaAction("restart"));
+$("#dh-btn-refresh")?.addEventListener("click", refreshDahuaStatus);
+
+$("#ov-dahua-open-btn")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  goto("dahuarust");
+});
+$("#ov-dahua-card")?.addEventListener("click", () => goto("dahuarust"));
+
+$("#dh-copy-logs")?.addEventListener("click", () => {
+  if (!latestDahuaSnapshot || !latestDahuaSnapshot.recentLogs || latestDahuaSnapshot.recentLogs.length === 0) {
+    toast("Хуулах лог бичлэг алга байна.", "err");
+    return;
+  }
+  const lines = latestDahuaSnapshot.recentLogs
+    .map((r, i) => `[${i + 1}] [${r.timestamp}] [${r.level}] ${r.message}`)
+    .join("\n");
+  navigator.clipboard.writeText(lines).then(() => {
+    toast("Сүүлийн 10 бичлэг санах ойд хуулагдлаа.", "ok");
+  }).catch(() => {
+    toast("Хуулахад алдаа гарлаа.", "err");
+  });
+});
 
 $("#save-btn").addEventListener("click", save);
 $("#add-service").addEventListener("click", () => {
@@ -449,7 +678,15 @@ $("#wiz-back").addEventListener("click", () => {
 // reappearing on the next launch. Settings and Save are right there instead.
 $("#wiz-skip").addEventListener("click", closeWizard);
 
+$("#alert-details-btn")?.addEventListener("click", showAlertModal);
+$("#local-alert-banner")?.addEventListener("click", (e) => {
+  if (e.target.id !== "alert-details-btn") showAlertModal();
+});
+$("#alert-modal-close")?.addEventListener("click", closeAlertModal);
+$("#alert-modal-ok")?.addEventListener("click", closeAlertModal);
+
 window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeAlertModal();
   if ((e.ctrlKey || e.metaKey) && e.key === "s") {
     e.preventDefault();
     if (isDirty()) save();

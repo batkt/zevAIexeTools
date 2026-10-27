@@ -45,7 +45,7 @@ pub fn run_elevated(exe: &Path, arg: &str) -> anyhow::Result<u32> {
     info.lpFile = exe_w.as_ptr();
     info.lpParameters = args_w.as_ptr();
     info.lpDirectory = dir_w.as_ref().map_or(std::ptr::null(), |d| d.as_ptr());
-    info.nShow = SW_HIDE as i32;
+    info.nShow = SW_HIDE;
 
     let ok = unsafe { ShellExecuteExW(&mut info) };
     if ok == 0 {

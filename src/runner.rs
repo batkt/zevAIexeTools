@@ -5,7 +5,7 @@
 
 use crate::config::Config;
 use crate::{
-    cleanup, event, eventlog, heal, health, logwatch, netqual, ports, sender, services, timesync,
+    cleanup, event, eventlog, heal, health, logwatch, netqual, notify, ports, sender, services, timesync,
     tushaal, update,
 };
 use chrono::{Datelike, Timelike};
@@ -29,6 +29,7 @@ pub async fn run_app(cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<()> {
     let mut prts = ports::PortCollector::new(cfg.ports.clone());
     let mut clock = timesync::TimeSyncCollector::new(cfg.timesync.clone(), &cfg.server.url);
     let mut updater = update::Updater::new(cfg.update.clone());
+    let mut notifier = notify::LocalNotifier::new(&cfg.notify, &state_dir);
     let mut out = sender::Sender::new(cfg.server.clone(), cfg.agent.clone(), &state_dir);
     let exec = tushaal::Executor::new(cfg.server.clone());
 
@@ -70,6 +71,7 @@ pub async fn run_app(cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<()> {
     // fleet restarting together.
     let mut due_update = Instant::now() + Duration::from_secs(120);
     let mut due_cleanup = Instant::now() + Duration::from_secs(90);
+    let mut due_notify = Instant::now() + Duration::from_secs(15);
     let mut last_cleanup_day: Option<String> = None;
 
     let evt_int = Duration::from_secs(cfg.eventlog.poll_interval_secs.max(5));
@@ -81,6 +83,7 @@ pub async fn run_app(cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<()> {
     let net_int = Duration::from_secs(cfg.netqual.poll_interval_secs.max(60));
     let clock_int = Duration::from_secs(cfg.timesync.poll_interval_secs.max(60));
     let update_int = Duration::from_secs(cfg.update.check_interval_hours.max(1) * 3600);
+    let notify_int = Duration::from_secs(15);
 
     while !stop.load(Ordering::Relaxed) {
         let now = Instant::now();
@@ -204,6 +207,24 @@ pub async fn run_app(cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<()> {
             }
         }
 
+        if cfg.notify.enabled && now >= due_notify {
+            due_notify = now + notify_int;
+            let (net_score, net_lat, net_loss) = netq.last_metrics();
+            let (disk_pct, disk_mount, disk_free) = hlth.worst_disk_info();
+            let closed_ports = prts.closed_ports();
+            notifier.evaluate(
+                net_score,
+                net_lat,
+                net_loss,
+                disk_pct,
+                &disk_mount,
+                disk_free,
+                &closed_ports,
+                healer.last_limit_hit(),
+            );
+            crate::dahua_monitor::get_dahua_status();
+        }
+
         if now >= due_send {
             due_send = now + send_int;
             out.flush().await;
@@ -219,6 +240,8 @@ pub async fn run_app(cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<()> {
                     network: netq.snapshot(),
                     ports: prts.snapshot(),
                     clock: clock.snapshot(),
+                    dahua: serde_json::to_value(crate::dahua_monitor::get_dahua_status())
+                        .unwrap_or(serde_json::Value::Null),
                 })
                 .await;
 

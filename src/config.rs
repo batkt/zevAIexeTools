@@ -30,6 +30,8 @@ pub struct Config {
     pub timesync: TimeSyncConfig,
     #[serde(default)]
     pub cleanup: CleanupConfig,
+    #[serde(default)]
+    pub notify: NotifyConfig,
 }
 
 // ─── clock ───────────────────────────────────────────────────────────────────
@@ -107,6 +109,44 @@ fn d_cleanup_hour() -> u32 { 3 }
 fn d_cleanup_age() -> u64 { 7 }
 fn d_cleanup_trigger() -> f32 { 92.0 }
 fn d_log_max_mb() -> u64 { 32 }
+
+// ─── local notification ──────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct NotifyConfig {
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+    #[serde(default = "d_true")]
+    pub popup_enabled: bool,
+    #[serde(default = "d_true")]
+    pub toast_enabled: bool,
+    #[serde(default = "d_true")]
+    pub sound_enabled: bool,
+    #[serde(default = "d_notify_net_threshold")]
+    pub netqual_threshold: u8,
+    #[serde(default = "d_notify_disk_threshold")]
+    pub disk_threshold: f32,
+    #[serde(default = "d_notify_cooldown")]
+    pub cooldown_mins: u64,
+}
+
+impl Default for NotifyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            popup_enabled: true,
+            toast_enabled: true,
+            sound_enabled: true,
+            netqual_threshold: d_notify_net_threshold(),
+            disk_threshold: d_notify_disk_threshold(),
+            cooldown_mins: d_notify_cooldown(),
+        }
+    }
+}
+
+fn d_notify_net_threshold() -> u8 { 70 }
+fn d_notify_disk_threshold() -> f32 { 90.0 }
+fn d_notify_cooldown() -> u64 { 15 }
 
 // ─── network quality ─────────────────────────────────────────────────────────
 

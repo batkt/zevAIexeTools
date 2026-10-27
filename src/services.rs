@@ -152,7 +152,7 @@ impl ServiceCollector {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Observed {
     pub state: String,
     pub pid: u32,
@@ -178,6 +178,11 @@ impl Observed {
     pub fn is_unknown(&self) -> bool {
         self.state.starts_with("Unknown")
     }
+}
+
+/// Queries the SCM for the service's current state and PID.
+pub fn query(name: &str) -> anyhow::Result<Observed> {
+    platform::query(name)
 }
 
 /// Asks the SCM to start a service. The agent runs as LocalSystem, so this
