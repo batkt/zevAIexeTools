@@ -294,6 +294,7 @@ async function serviceAction(action) {
 // ─── dahua parking service monitor ────────────────────────────────────────
 let latestDahuaSnapshot = null;
 let dahuaPollTimer = null;
+let isDahuaRefreshing = false;
 
 function escapeHtml(str) {
   if (!str) return "";
@@ -306,12 +307,16 @@ function escapeHtml(str) {
 }
 
 async function refreshDahuaStatus() {
+  if (isDahuaRefreshing) return;
+  isDahuaRefreshing = true;
   try {
     const s = await invoke("dahua_status");
     latestDahuaSnapshot = s;
     renderDahuaUI(s);
   } catch (err) {
     console.error("Dahua status query error:", err);
+  } finally {
+    isDahuaRefreshing = false;
   }
 }
 
@@ -577,13 +582,13 @@ async function boot() {
   }
 
   await refreshDahuaStatus();
-  statusTimer = setInterval(refreshStatus, 4000);
+  statusTimer = setInterval(refreshStatus, 6000);
   dahuaPollTimer = setInterval(() => {
     const auto = $("#dh-auto-refresh");
     if (!auto || auto.checked) {
       refreshDahuaStatus();
     }
-  }, 2500);
+  }, 4000);
 }
 
 // ─── events ──────────────────────────────────────────────────────────────

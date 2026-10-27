@@ -524,8 +524,8 @@ input[type="range"]::-webkit-slider-thumb {
   animation: pulse-border 2s infinite;
 }
 @keyframes pulse-border {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-  50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.15); }
+  0%, 100% { border-color: rgba(239, 68, 68, 0.35); }
+  50% { border-color: rgba(239, 68, 68, 0.85); }
 }
 .local-alert-banner .alert-left {
   display: flex;

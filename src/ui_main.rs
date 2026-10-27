@@ -159,8 +159,10 @@ fn get_active_alerts() -> Vec<zev_detector::notify::ActiveAlert> {
 }
 
 #[tauri::command]
-fn dahua_status() -> zev_detector::dahua_monitor::DahuaStatusSnapshot {
-    zev_detector::dahua_monitor::get_dahua_status()
+async fn dahua_status() -> zev_detector::dahua_monitor::DahuaStatusSnapshot {
+    tauri::async_runtime::spawn_blocking(zev_detector::dahua_monitor::get_dahua_status)
+        .await
+        .unwrap_or_else(|_| zev_detector::dahua_monitor::DahuaStatusSnapshot::default())
 }
 
 #[tauri::command]

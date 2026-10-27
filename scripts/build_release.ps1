@@ -60,6 +60,8 @@ $DistDir = Join-Path $AgentRoot "dist"
 $StandaloneDir = Join-Path $DistDir "Zev-Detector-v$Version-standalone"
 
 if (Test-Path $StandaloneDir) {
+    Stop-Process -Name "zev-detector-ui" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 300
     Remove-Item -Path $StandaloneDir -Recurse -Force
 }
 New-Item -ItemType Directory -Path $StandaloneDir -Force | Out-Null

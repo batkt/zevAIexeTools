@@ -159,8 +159,12 @@ impl PortCollector {
 }
 
 pub fn is_open(host: &str, port: u16) -> bool {
+    is_open_timeout(host, port, CONNECT_TIMEOUT)
+}
+
+pub fn is_open_timeout(host: &str, port: u16, timeout: Duration) -> bool {
     match (host, port).to_socket_addrs() {
-        Ok(mut addrs) => addrs.any(|a| TcpStream::connect_timeout(&a, CONNECT_TIMEOUT).is_ok()),
+        Ok(mut addrs) => addrs.any(|a| TcpStream::connect_timeout(&a, timeout).is_ok()),
         Err(_) => false,
     }
 }

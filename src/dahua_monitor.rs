@@ -22,7 +22,7 @@ pub const DAHUA_API_PORT: u16 = 5000;
 pub const DAHUA_NETSDK_PORT: u16 = 37777;
 pub const MAX_RING_BUFFER_RECORDS: usize = 10;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DahuaLogRecord {
     pub id: usize,
@@ -32,7 +32,7 @@ pub struct DahuaLogRecord {
     pub raw: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DahuaStatusSnapshot {
     pub service_name: String,
@@ -196,8 +196,9 @@ pub fn get_dahua_status() -> DahuaStatusSnapshot {
         }
     }
 
-    let api_port_5000_open = ports::is_open("127.0.0.1", DAHUA_API_PORT);
-    let netsdk_port_37777_open = ports::is_open("127.0.0.1", DAHUA_NETSDK_PORT);
+    let local_timeout = std::time::Duration::from_millis(150);
+    let api_port_5000_open = ports::is_open_timeout("127.0.0.1", DAHUA_API_PORT, local_timeout);
+    let netsdk_port_37777_open = ports::is_open_timeout("127.0.0.1", DAHUA_NETSDK_PORT, local_timeout);
 
     // If SCM says stopped or not installed, but Port 5000 is listening, it is active in standalone/console mode
     let is_active = observed.is_running() || api_port_5000_open;
