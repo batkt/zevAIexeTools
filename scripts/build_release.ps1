@@ -48,7 +48,7 @@ if (-not (Test-Path $DetectorExe) -or -not (Test-Path $UiExe)) {
 # 3. Detect Version & Calculate Checksums
 Write-Host "`n[3/5] Inspecting binaries and calculating SHA-256..." -ForegroundColor Yellow
 $VersionRaw = (& $DetectorExe --version)
-$Version = if ($VersionRaw -match '[\d\.]+') { $Matches[0] } else { "1.2.0" }
+$Version = if ($VersionRaw -match '[\d\.]+') { $Matches[0] } else { "1.3.0" }
 Write-Host "Detected Agent Version: $Version" -ForegroundColor Cyan
 
 $HashDetector = (Get-FileHash -Path $DetectorExe -Algorithm SHA256).Hash
