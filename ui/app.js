@@ -157,6 +157,7 @@ const renderLogs = () =>
   renderList($("#logs-list"), "tpl-log", cfg.logs.files, renderLogs);
 const renderProbes = () =>
   renderList($("#probes-list"), "tpl-probe", cfg.health.http, renderProbes);
+const renderPorts = () => renderList($("#ports-list"), "tpl-port", cfg.ports, renderPorts);
 
 function renderWatchList() {
   const rows = [
@@ -249,7 +250,9 @@ const PAGE_META = {
   eventlog: ["Event Log", "Windows-ийн үйл явдлын бүртгэл"],
   services: ["Үйлчилгээ", "Хянах Windows үйлчилгээнүүд"],
   logfiles: ["Лог файл", "Програмын лог мөрүүд"],
-  health:   ["Эрүүл мэнд", "CPU, RAM, диск ба HTTP шалгалт"],
+  health:   ["Эрүүл мэнд", "CPU, RAM, диск, порт ба сүлжээ"],
+  maintenance: ["Цаг & цэвэрлэлт", "Цагийн зөрүү ба хуваарьт цэвэрлэлт"],
+  update:   ["Шинэчлэлт", "GitHub release-ээс өөрөө шинэчлэх"],
   logview:  ["Бүртгэл", "zev-detector.log"],
 };
 
@@ -347,6 +350,7 @@ function closeWizard() {
   renderServices();
   renderLogs();
   renderProbes();
+  renderPorts();
   markDirty();
   refreshStatus();
 }
@@ -385,7 +389,10 @@ $$("[data-svc]").forEach((b) => b.addEventListener("click", () => serviceAction(
 
 $("#save-btn").addEventListener("click", save);
 $("#add-service").addEventListener("click", () => {
-  cfg.services.push({ name: "", label: "", must_run: true });
+  cfg.services.push({
+    name: "", label: "", must_run: true,
+    auto_restart: true, max_restarts_per_hour: 3, restart_grace_secs: 45,
+  });
   renderServices();
   markDirty();
 });
@@ -395,8 +402,16 @@ $("#add-log").addEventListener("click", () => {
   markDirty();
 });
 $("#add-probe").addEventListener("click", () => {
-  cfg.health.http.push({ name: "", url: "", expect: "", timeout_secs: 5, system: "" });
+  cfg.health.http.push({
+    name: "", url: "", expect: "", timeout_secs: 5, system: "",
+    service: "", restart_after_failures: 3,
+  });
   renderProbes();
+  markDirty();
+});
+$("#add-port").addEventListener("click", () => {
+  cfg.ports.push({ port: 0, label: "", host: "127.0.0.1", must_listen: true });
+  renderPorts();
   markDirty();
 });
 

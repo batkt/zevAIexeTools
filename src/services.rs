@@ -21,11 +21,19 @@ struct Known {
 pub struct ServiceCollector {
     entries: Vec<ServiceEntry>,
     known: HashMap<String, Known>,
+    /// Whatever the last `poll()` actually saw, keyed by service name. The
+    /// healer reads this instead of querying the SCM again, so both are
+    /// deciding from exactly the same observation.
+    last_seen: HashMap<String, Observed>,
 }
 
 impl ServiceCollector {
     pub fn new(entries: Vec<ServiceEntry>) -> Self {
-        Self { entries, known: HashMap::new() }
+        Self { entries, known: HashMap::new(), last_seen: HashMap::new() }
+    }
+
+    pub fn last_seen(&self) -> &HashMap<String, Observed> {
+        &self.last_seen
     }
 
     pub fn poll(&mut self) -> Vec<DetectorEvent> {
@@ -37,6 +45,10 @@ impl ServiceCollector {
                 Ok(s) => (s.state, s.pid, s.exit_code),
                 Err(e) => (format!("Unknown ({e})"), 0, 0),
             };
+            self.last_seen.insert(
+                entry.name.clone(),
+                Observed { state: state.clone(), pid, exit_code },
+            );
 
             let running = state == "Running";
             let prev = self.known.get(&entry.name);
@@ -140,10 +152,74 @@ impl ServiceCollector {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Observed {
     pub state: String,
     pub pid: u32,
     pub exit_code: u32,
+}
+
+impl Observed {
+    pub fn is_running(&self) -> bool {
+        self.state == "Running"
+    }
+
+    /// True while the SCM is mid-transition. Acting on these would mean
+    /// fighting a start that is already happening.
+    pub fn is_transitional(&self) -> bool {
+        matches!(
+            self.state.as_str(),
+            "StartPending" | "StopPending" | "ContinuePending" | "PausePending"
+        )
+    }
+
+    /// True when the service could not be queried at all — usually "not
+    /// installed" or a rights problem, neither of which a restart fixes.
+    pub fn is_unknown(&self) -> bool {
+        self.state.starts_with("Unknown")
+    }
+}
+
+/// Asks the SCM to start a service. The agent runs as LocalSystem, so this
+/// needs no elevation dance — unlike the desktop app, which has to shell out.
+pub fn start(name: &str) -> anyhow::Result<()> {
+    platform::start(name)
+}
+
+/// Asks the SCM to stop a service. Returns as soon as the request is accepted;
+/// the stop itself is observed on a later poll rather than waited for, so the
+/// detector loop is never blocked by a service that takes its time shutting down.
+pub fn stop(name: &str) -> anyhow::Result<()> {
+    platform::stop(name)
+}
+
+/// The exe the SCM will actually launch for this service.
+///
+/// Asked of the SCM rather than assumed, because the installed location is
+/// wherever `install` happened to be run from — for dahuarust that is its own
+/// `target\release`, not a Program Files path. Replacing the wrong file would
+/// leave the real service untouched and look like a silently failed update.
+pub fn exe_path(name: &str) -> anyhow::Result<std::path::PathBuf> {
+    platform::exe_path(name)
+}
+
+/// Blocks until the service reaches (or leaves) the Running state, or the
+/// deadline passes. Used only by the updater, which genuinely must serialise:
+/// the exe cannot be replaced until the process holding it has exited.
+pub fn wait_for(name: &str, running: bool, timeout: Duration) -> anyhow::Result<bool> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match platform::query(name) {
+            Ok(observed) if observed.is_running() == running => return Ok(true),
+            // "Not installed" will never change by waiting.
+            Err(e) if running => return Err(e),
+            _ => {}
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
 }
 
 #[cfg(windows)]
@@ -151,6 +227,29 @@ mod platform {
     use super::Observed;
     use windows_service::service::{ServiceAccess, ServiceExitCode, ServiceState};
     use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
+
+    pub fn start(name: &str) -> anyhow::Result<()> {
+        let manager =
+            ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+        let service = manager.open_service(name, ServiceAccess::START)?;
+        service.start::<&str>(&[])?;
+        Ok(())
+    }
+
+    pub fn stop(name: &str) -> anyhow::Result<()> {
+        let manager =
+            ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+        let service = manager.open_service(name, ServiceAccess::STOP)?;
+        service.stop()?;
+        Ok(())
+    }
+
+    pub fn exe_path(name: &str) -> anyhow::Result<std::path::PathBuf> {
+        let manager =
+            ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+        let service = manager.open_service(name, ServiceAccess::QUERY_CONFIG)?;
+        Ok(service.query_config()?.executable_path)
+    }
 
     pub fn query(name: &str) -> anyhow::Result<Observed> {
         let manager =
@@ -183,6 +282,18 @@ mod platform {
     use super::Observed;
 
     pub fn query(_name: &str) -> anyhow::Result<Observed> {
+        anyhow::bail!("service control manager is only available on Windows")
+    }
+
+    pub fn start(_name: &str) -> anyhow::Result<()> {
+        anyhow::bail!("service control manager is only available on Windows")
+    }
+
+    pub fn stop(_name: &str) -> anyhow::Result<()> {
+        anyhow::bail!("service control manager is only available on Windows")
+    }
+
+    pub fn exe_path(_name: &str) -> anyhow::Result<std::path::PathBuf> {
         anyhow::bail!("service control manager is only available on Windows")
     }
 }

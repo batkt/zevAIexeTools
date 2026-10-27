@@ -40,15 +40,28 @@ max_per_poll     = 200
 
 # ─── 2. Windows services ─────────────────────────────────────────────────────
 # One block per service. `name` is the SCM key, not the display name.
+#
+# auto_restart closes a gap Windows leaves open: the SCM's own failure actions
+# only fire when a service *crashes*. One that exited cleanly, was stopped by
+# something else, or that the SCM has already given up retrying stays down
+# until someone notices. The agent runs as LocalSystem, so it can start it.
+#
+# max_restarts_per_hour is a rolling-hour ceiling. A service needing more than
+# this will not be fixed by another restart, so at the cap the agent stops and
+# reports one Critical instead of bouncing it forever.
 [[services]]
-name     = "DahuaParkingService"
-label    = "Dahua Parking (dahuarust)"
-must_run = true
+name                  = "DahuaParkingService"
+label                 = "Dahua Parking (dahuarust)"
+must_run              = true
+auto_restart          = true
+max_restarts_per_hour = 3
+restart_grace_secs    = 45   # how long a start gets before it counts as failed
 
 # [[services]]
-# name     = "ZevWorker"
-# label    = "Zev Worker"
-# must_run = true
+# name         = "ZevWorker"
+# label        = "Zev Worker"
+# must_run     = true
+# auto_restart = false        # watch only, never touch it
 
 # ─── 3. Application log files ────────────────────────────────────────────────
 [logs]
@@ -70,6 +83,81 @@ context_lines = 8
 # glob   = '*.log'
 # system = "worker"
 
+# ─── 8. Цагийн зөрүү ─────────────────────────────────────────────────────────
+# Зөрүүг NTP-ээс биш, өөрсдийн API-ийн Date толгойгоос хэмжинэ — JWT-г шалгаж,
+# үйл явдлын хугацааг хадгалдаг эрх мэдэлтэн нь тэр сервер. pool.ntp.org-той
+# тохирч байгаад udirdlagaBack-тай зөрсөн машин бас л буруу өгөгдөл гаргана.
+#
+# auto_resync нь w32tm-ээр цагийг ЗАСНА. Энэ нь ажиллаж байгаа зүйлийн доор
+# цагийг хөдөлгөнө — тухайлбал үргэлжилж байгаа зогсоолын хугацаа хазайж
+# мэднэ. Гэхдээ цаг нь буруу машинаас дээр. 30 минутад нэгээс олон засахгүй.
+[timesync]
+enabled            = true
+poll_interval_secs = 900
+max_drift_secs     = 30
+auto_resync        = true
+
+# ─── 9. Диск цэвэрлэлт ───────────────────────────────────────────────────────
+# Агентын УСТГАДАГ цорын ганц хэсэг. Хаана цэвэрлэхийг тохируулах боломжгүй —
+# зам нь кодод бичигдсэн: Windows Temp, Minidump, SoftwareDistribution\Download,
+# LocalSystem-ийн TEMP, CrashDumps. Тохиргооны алдаа C:\ рүү чиглүүлж чадахгүй.
+#
+# Хөтчийн кэшийг ЗОРИУДААР оруулаагүй: цэвэрлэвэл киоск хөтөч нэвтэрсэн
+# бүхнээсээ гарна. Мөн зөвхөн файл устгана, хавтас хөндөхгүй, junction-ийг
+# дагахгүй, min_age_days-аас шинэ юмыг хэзээ ч авахгүй.
+[cleanup]
+enabled              = true
+weekday              = 0     # 0 = Ням
+hour                 = 3     # орон нутгийн цагаар 03:00
+min_age_days         = 7
+disk_trigger_percent = 92    # диск дүүрэхэд хуваарь хүлээхгүй (0 = унтраах)
+log_max_mb           = 32    # өөрийн лог үүнээс хэтэрвэл сольж хадгална
+
+# ─── 6. Сүлжээний чанар ──────────────────────────────────────────────────────
+# Латент, гээгдэл, тасалдлын тооноос 0-100 оноо бодно.
+#
+# Гээгдлийг ping-ийн exit code-оор хэмждэг — ping.exe-ийн текст нь Windows-ийн
+# хэлнээс шалтгаалж хөрвүүлэгддэг тул уншиж болохгүй. Латентыг харин процесс
+# ажиллуулах зардлыг (5-15мс) хасахын тулд TCP холболтоор дотооддоо хэмжинэ.
+# ICMP хаалттай сүлжээнд гээгдэл нь "мэдэгдэхгүй" болно, 100% гэж бичихгүй.
+[netqual]
+enabled            = true
+poll_interval_secs = 300
+ping_host          = ""    # хоосон = [server].url-ийн хост
+ping_count         = 10
+score_threshold    = 70    # доогуур бол Warning
+
+# ─── 7. Локал портууд ────────────────────────────────────────────────────────
+# Үйлчилгээ "Running" байхад listener нь босоогүй байж болно (порт эзэлсэн,
+# firewall дүрэм нэмэгдсэн). Портыг шууд шалгах нь тэрийг барьж авдаг.
+[[ports]]
+port  = 37777
+label = "Dahua SDK"
+
+[[ports]]
+port  = 5000
+label = "Parking service"
+
+# [[ports]]
+# port        = 554
+# label       = "RTSP"
+# host        = "192.168.1.108"   # анхдагч нь 127.0.0.1
+# must_listen = false             # хаалттай бол Critical биш Warning
+
+# ─── 5. Өөрөө шинэчлэх / self-update ─────────────────────────────────────────
+# mode = "off"  — хэзээ ч шалгахгүй
+#        "ask"  — шинэ хувилбар гарсныг мэдэгдэнэ, хүн зөвшөөрнө (анхдагч)
+#        "auto" — хүнгүйгээр суулгана
+#
+# Анхдагчаар "ask": зогсоол өдөржин ажилладаг тул хэн ч хүлээгээгүй үед
+# үйлчилгээ дахин ачаалах нь нэг хувилбар хоцрохоос дор.
+[update]
+mode                 = "ask"
+check_interval_hours = 6
+github_repo          = ""      # "owner/name" — GitHub release-үүд байрлах repo
+github_token         = ""      # хувийн (private) repo бол л шаардлагатай
+window               = ""      # "02:00-05:00" гэвэл зөвхөн тэр хооронд (auto үед)
+
 # ─── 4. Health ───────────────────────────────────────────────────────────────
 [health]
 enabled            = true
@@ -78,9 +166,16 @@ cpu_threshold      = 90
 mem_threshold      = 90
 disk_threshold     = 90
 
+# `service` is what turns a probe into a repair. Without it an unanswered
+# endpoint is only reported. With it, the named service is restarted after
+# `restart_after_failures` consecutive misses — which catches the one failure
+# the Service Control Manager cannot see: a process still marked Running whose
+# listener is wedged. It shares the service's max_restarts_per_hour budget.
 [[health.http]]
-name         = "dahua api"
-url          = "http://127.0.0.1:5000/api/health"
-expect       = "OK"
-timeout_secs = 5
-system       = "dahuarust"
+name                   = "dahua api"
+url                    = "http://127.0.0.1:5000/api/health"
+expect                 = "OK"
+timeout_secs           = 5
+system                 = "dahuarust"
+service                = "DahuaParkingService"
+restart_after_failures = 3

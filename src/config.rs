@@ -18,7 +18,193 @@ pub struct Config {
     pub logs: LogsConfig,
     #[serde(default)]
     pub health: HealthConfig,
+    #[serde(default)]
+    pub update: UpdateConfig,
+    #[serde(default)]
+    pub netqual: NetQualConfig,
+    /// Local TCP ports that should be listening (cameras, RTSP, Dahua, the
+    /// parking service itself).
+    #[serde(default)]
+    pub ports: Vec<PortEntry>,
+    #[serde(default)]
+    pub timesync: TimeSyncConfig,
+    #[serde(default)]
+    pub cleanup: CleanupConfig,
 }
+
+// ─── clock ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TimeSyncConfig {
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+    #[serde(default = "d_time_poll")]
+    pub poll_interval_secs: u64,
+    /// Drift beyond this many seconds is reported, and resynced if allowed.
+    #[serde(default = "d_max_drift")]
+    pub max_drift_secs: i64,
+    /// Run `w32tm /resync` when drift exceeds the limit.
+    ///
+    /// Worth knowing: this moves the clock under whatever is running, so a
+    /// parking session in progress can have its duration shift. That is still
+    /// better than a machine whose timestamps and JWT validation are wrong.
+    #[serde(default = "d_true")]
+    pub auto_resync: bool,
+}
+
+impl Default for TimeSyncConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            poll_interval_secs: d_time_poll(),
+            max_drift_secs: d_max_drift(),
+            auto_resync: true,
+        }
+    }
+}
+
+fn d_time_poll() -> u64 { 900 }
+fn d_max_drift() -> i64 { 30 }
+
+// ─── disk cleanup ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct CleanupConfig {
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+    /// 0 = Sunday … 6 = Saturday.
+    #[serde(default)]
+    pub weekday: u8,
+    /// Local hour to run at.
+    #[serde(default = "d_cleanup_hour")]
+    pub hour: u32,
+    /// Nothing newer than this is ever deleted.
+    #[serde(default = "d_cleanup_age")]
+    pub min_age_days: u64,
+    /// Also run whenever a disk crosses this used-percentage, not just weekly.
+    /// 0 disables the emergency pass.
+    #[serde(default = "d_cleanup_trigger")]
+    pub disk_trigger_percent: f32,
+    /// Rotate our own log once it passes this size.
+    #[serde(default = "d_log_max_mb")]
+    pub log_max_mb: u64,
+}
+
+impl Default for CleanupConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            weekday: 0,
+            hour: d_cleanup_hour(),
+            min_age_days: d_cleanup_age(),
+            disk_trigger_percent: d_cleanup_trigger(),
+            log_max_mb: d_log_max_mb(),
+        }
+    }
+}
+
+fn d_cleanup_hour() -> u32 { 3 }
+fn d_cleanup_age() -> u64 { 7 }
+fn d_cleanup_trigger() -> f32 { 92.0 }
+fn d_log_max_mb() -> u64 { 32 }
+
+// ─── network quality ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct NetQualConfig {
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+    #[serde(default = "d_netqual_poll")]
+    pub poll_interval_secs: u64,
+    /// Host to ping. Empty means "the host from [server].url", which is the
+    /// link that actually matters to this agent.
+    #[serde(default)]
+    pub ping_host: String,
+    #[serde(default = "d_ping_count")]
+    pub ping_count: u32,
+    /// Report a Warning below this score.
+    #[serde(default = "d_score_threshold")]
+    pub score_threshold: u32,
+}
+
+impl Default for NetQualConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            poll_interval_secs: d_netqual_poll(),
+            ping_host: String::new(),
+            ping_count: d_ping_count(),
+            score_threshold: d_score_threshold(),
+        }
+    }
+}
+
+fn d_netqual_poll() -> u64 { 300 }
+fn d_ping_count() -> u32 { 10 }
+fn d_score_threshold() -> u32 { 70 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct PortEntry {
+    pub port: u16,
+    #[serde(default)]
+    pub label: String,
+    /// Defaults to 127.0.0.1 — these are local listeners, not remote hosts.
+    #[serde(default = "d_port_host")]
+    pub host: String,
+    /// Report a Critical when nothing is listening.
+    #[serde(default = "d_true")]
+    pub must_listen: bool,
+}
+
+impl Default for PortEntry {
+    fn default() -> Self {
+        Self { port: 0, label: String::new(), host: d_port_host(), must_listen: true }
+    }
+}
+
+fn d_port_host() -> String { "127.0.0.1".to_string() }
+
+// ─── self-update ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UpdateConfig {
+    /// "off" — never check.
+    /// "ask" — notice a new release and report it; a human approves.
+    /// "auto" — install it unattended.
+    ///
+    /// Defaults to "ask" on purpose: a parking site runs all day, and a service
+    /// restarting mid-shift without anyone expecting it is worse than being a
+    /// version behind.
+    #[serde(default = "d_update_mode")]
+    pub mode: String,
+    #[serde(default = "d_update_interval")]
+    pub check_interval_hours: u64,
+    /// GitHub repository releases are published to, as "owner/name".
+    #[serde(default)]
+    pub github_repo: String,
+    /// Personal access token, needed only for a private repository.
+    #[serde(default)]
+    pub github_token: String,
+    /// Only install inside this local-time window, as "HH:MM-HH:MM".
+    /// Empty means any time. Ignored unless mode = "auto".
+    #[serde(default)]
+    pub window: String,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            mode: d_update_mode(),
+            check_interval_hours: d_update_interval(),
+            github_repo: String::new(),
+            github_token: String::new(),
+            window: String::new(),
+        }
+    }
+}
+
+fn d_update_mode() -> String { "ask".to_string() }
+fn d_update_interval() -> u64 { 6 }
 
 // ─── server ──────────────────────────────────────────────────────────────────
 
@@ -147,11 +333,40 @@ pub struct ServiceEntry {
     /// Report a Critical when the service is not Running.
     #[serde(default = "d_true")]
     pub must_run: bool,
+
+    // ─── self-healing ────────────────────────────────────────────────────
+    /// Try to start the service again when it is found stopped.
+    ///
+    /// This is not the same as the SCM's own failure actions, which only fire
+    /// when a service *crashes*. A service that exited cleanly, was stopped by
+    /// something else, or that the SCM has already given up on stays down —
+    /// that is the gap this closes.
+    #[serde(default = "d_true")]
+    pub auto_restart: bool,
+    /// Ceiling on restart attempts in any rolling hour. A service that needs
+    /// more than this is not going to be fixed by another restart, so the
+    /// agent stops and reports instead of hammering it forever.
+    #[serde(default = "d_max_restarts")]
+    pub max_restarts_per_hour: u32,
+    /// How long to let a start attempt settle before judging it. Must comfortably
+    /// exceed the service's own startup time or every start looks like a failure.
+    #[serde(default = "d_restart_grace")]
+    pub restart_grace_secs: u64,
 }
+
+fn d_max_restarts() -> u32 { 3 }
+fn d_restart_grace() -> u64 { 45 }
 
 impl Default for ServiceEntry {
     fn default() -> Self {
-        Self { name: String::new(), label: String::new(), must_run: true }
+        Self {
+            name: String::new(),
+            label: String::new(),
+            must_run: true,
+            auto_restart: true,
+            max_restarts_per_hour: d_max_restarts(),
+            restart_grace_secs: d_restart_grace(),
+        }
     }
 }
 
@@ -260,9 +475,21 @@ pub struct HttpProbe {
     pub timeout_secs: u64,
     #[serde(default)]
     pub system: String,
+
+    /// SCM name of the service behind this endpoint. Set it and a persistently
+    /// unanswered probe will restart that service — which catches the failure
+    /// the Service Control Manager cannot see: a process that is still
+    /// `Running` but wedged and no longer serving.
+    #[serde(default)]
+    pub service: String,
+    /// Consecutive failed probes before that restart. Anything lower than a
+    /// couple of cycles risks restarting on one dropped request.
+    #[serde(default = "d_probe_fails")]
+    pub restart_after_failures: u32,
 }
 
 fn d_probe_timeout() -> u64 { 5 }
+fn d_probe_fails() -> u32 { 3 }
 
 impl Default for HttpProbe {
     fn default() -> Self {
@@ -272,6 +499,8 @@ impl Default for HttpProbe {
             expect: String::new(),
             timeout_secs: d_probe_timeout(),
             system: String::new(),
+            service: String::new(),
+            restart_after_failures: d_probe_fails(),
         }
     }
 }

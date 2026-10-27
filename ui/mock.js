@@ -39,7 +39,10 @@ if (!window.__TAURI__) {
       max_per_poll: 200,
     },
     services: [
-      { name: "DahuaParkingService", label: "Dahua Parking (dahuarust)", must_run: true },
+      {
+        name: "DahuaParkingService", label: "Dahua Parking (dahuarust)", must_run: true,
+        auto_restart: true, max_restarts_per_hour: 3, restart_grace_secs: 45,
+      },
     ],
     logs: {
       enabled: true,
@@ -59,7 +62,40 @@ if (!window.__TAURI__) {
       http: [{
         name: "dahua api", url: "http://127.0.0.1:5000/api/health",
         expect: "OK", timeout_secs: 5, system: "dahuarust",
+        service: "DahuaParkingService", restart_after_failures: 3,
       }],
+    },
+    netqual: {
+      enabled: true,
+      poll_interval_secs: 300,
+      ping_host: "",
+      ping_count: 10,
+      score_threshold: 70,
+    },
+    ports: [
+      { port: 37777, label: "Dahua SDK", host: "127.0.0.1", must_listen: true },
+      { port: 5000, label: "Parking service", host: "127.0.0.1", must_listen: true },
+    ],
+    update: {
+      mode: "ask",
+      check_interval_hours: 6,
+      github_repo: "",
+      github_token: "",
+      window: "",
+    },
+    timesync: {
+      enabled: true,
+      poll_interval_secs: 900,
+      max_drift_secs: 30,
+      auto_resync: true,
+    },
+    cleanup: {
+      enabled: true,
+      weekday: 0,
+      hour: 3,
+      min_age_days: 7,
+      disk_trigger_percent: 92,
+      log_max_mb: 32,
     },
   };
 

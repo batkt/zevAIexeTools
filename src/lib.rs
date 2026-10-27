@@ -24,15 +24,23 @@
 //! plain console program with no window, no WebView and no GUI dependencies,
 //! exactly as it was before the desktop app existed.
 
+pub mod cleanup;
 pub mod config;
+pub mod diag;
 pub mod elevate;
 pub mod event;
 pub mod eventlog;
+pub mod heal;
 pub mod health;
 pub mod logwatch;
+pub mod netqual;
+pub mod ports;
 pub mod runner;
 pub mod sender;
 pub mod services;
+pub mod timesync;
+pub mod tushaal;
+pub mod update;
 pub mod winsvc;
 
 pub const SERVICE_NAME: &str = "ZevDetector";

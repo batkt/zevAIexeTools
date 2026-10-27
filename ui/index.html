@@ -13,7 +13,7 @@
   <div class="wizard-card">
     <div class="wizard-rail">
       <div class="brand">
-        <div class="brand-mark">Z</div>
+        <img class="brand-mark" src="logo.png" alt="Zev Tabs" />
         <div>
           <div class="brand-name">Zev Detector</div>
           <div class="brand-sub">Тохиргооны шидтэн</div>
@@ -122,7 +122,7 @@
 <div id="app" class="app" hidden>
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-mark">Z</div>
+      <img class="brand-mark" src="logo.png" alt="Zev Tabs" />
       <div>
         <div class="brand-name">Zev Detector</div>
         <div class="brand-sub">v<span data-text="version"></span></div>
@@ -139,6 +139,9 @@
       <button class="nav-item" data-page="services"><i class="ico ico-svc"></i><span>Үйлчилгээ</span><span class="pill" id="count-services">0</span></button>
       <button class="nav-item" data-page="logfiles"><i class="ico ico-log"></i><span>Лог файл</span><span class="pill" id="count-logs">0</span></button>
       <button class="nav-item" data-page="health"><i class="ico ico-hp"></i><span>Эрүүл мэнд</span></button>
+      <div class="nav-label">Арчилгаа</div>
+      <button class="nav-item" data-page="maintenance"><i class="ico ico-hp"></i><span>Цаг & цэвэрлэлт</span></button>
+      <button class="nav-item" data-page="update"><i class="ico ico-cloud"></i><span>Шинэчлэлт</span></button>
       <div class="nav-label">Хэрэгсэл</div>
       <button class="nav-item" data-page="logview"><i class="ico ico-doc"></i><span>Бүртгэл</span></button>
     </nav>
@@ -310,6 +313,84 @@
         <div class="card"><h3>HTTP шалгалт</h3><p class="muted">Хаяг тус бүрийг тогтмол дуудаж, хариу ирэхгүй бол мэдэгдэнэ.</p></div>
         <div id="probes-list" class="list"></div>
         <button class="btn dashed" id="add-probe">+ HTTP шалгалт нэмэх</button>
+
+        <div class="card">
+          <h3>Сүлжээний чанар</h3>
+          <label class="toggle"><input type="checkbox" data-bind="netqual.enabled" /><span class="sw"></span><div><b>Оноо бодох</b><small>Латент, гээгдэл, тасалдлаас 0–100 оноо</small></div></label>
+          <div class="field-row">
+            <label class="field"><span>Шалгах давтамж (сек)</span><input type="number" min="60" max="3600" data-bind="netqual.poll_interval_secs" /></label>
+            <label class="field"><span>Ping хэдэн удаа</span><input type="number" min="1" max="50" data-bind="netqual.ping_count" /></label>
+          </div>
+          <div class="field-row">
+            <label class="field"><span>Ping хост</span><input type="text" data-bind="netqual.ping_host" placeholder="хоосон = серверийн хост" /></label>
+            <label class="field"><span>Анхааруулах оноо</span><input type="number" min="0" max="100" data-bind="netqual.score_threshold" /><small>Доогуур бол Warning</small></label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Локал портууд</h3>
+          <p class="muted">Үйлчилгээ ажиллаж байхад listener нь босоогүй байж болно — портыг шууд шалгах нь тэрийг барьж авна.</p>
+        </div>
+        <div id="ports-list" class="list"></div>
+        <button class="btn dashed" id="add-port">+ Порт нэмэх</button>
+      </section>
+
+      <!-- maintenance: clock + cleanup -->
+      <section class="page" data-page="maintenance">
+        <div class="card">
+          <h3>Цагийн зөрүү</h3>
+          <p class="muted">Зөрүүг NTP-ээс биш, өөрсдийн серверийн Date толгойгоос хэмжинэ — JWT шалгаж, үйл явдлын хугацааг хадгалдаг эрх мэдэлтэн нь тэр.</p>
+          <label class="toggle"><input type="checkbox" data-bind="timesync.enabled" /><span class="sw"></span><div><b>Цаг шалгах</b></div></label>
+          <div class="field-row">
+            <label class="field"><span>Шалгах давтамж (сек)</span><input type="number" min="60" max="86400" data-bind="timesync.poll_interval_secs" /></label>
+            <label class="field"><span>Зөвшөөрөх зөрүү (сек)</span><input type="number" min="1" max="3600" data-bind="timesync.max_drift_secs" /></label>
+          </div>
+          <label class="toggle"><input type="checkbox" data-bind="timesync.auto_resync" /><span class="sw"></span><div><b>Автоматаар тааруулах</b><small>w32tm-ээр цагийг ЗАСНА — ажиллаж байгаа зогсоолын хугацаа хазайж мэднэ. 30 минутад нэг л удаа.</small></div></label>
+        </div>
+
+        <div class="card">
+          <h3>Диск цэвэрлэлт</h3>
+          <p class="muted">Цэвэрлэх зам нь кодод бичигдсэн: Windows Temp, Minidump, SoftwareDistribution\Download, CrashDumps. Хөтчийн кэшийг зориудаар хөндөхгүй — киоск хөтөч нэвтэрсэн бүхнээсээ гарна.</p>
+          <label class="toggle"><input type="checkbox" data-bind="cleanup.enabled" /><span class="sw"></span><div><b>Хуваарьт цэвэрлэлт</b></div></label>
+          <div class="field-row">
+            <label class="field"><span>Гараг</span>
+              <select data-bind="cleanup.weekday">
+                <option value="0">Ням</option><option value="1">Даваа</option>
+                <option value="2">Мягмар</option><option value="3">Лхагва</option>
+                <option value="4">Пүрэв</option><option value="5">Баасан</option>
+                <option value="6">Хагас</option>
+              </select>
+            </label>
+            <label class="field"><span>Цаг</span><input type="number" min="0" max="23" data-bind="cleanup.hour" /></label>
+          </div>
+          <div class="field-row">
+            <label class="field"><span>Хамгийн багадаа хэдэн хоногийн өмнөх</span><input type="number" min="1" max="365" data-bind="cleanup.min_age_days" /><small>Үүнээс шинэ файлыг хэзээ ч авахгүй</small></label>
+            <label class="field"><span>Диск дүүрэхэд (%)</span><input type="number" min="0" max="100" data-bind="cleanup.disk_trigger_percent" /><small>Хуваарь хүлээхгүй. 0 = унтраах</small></label>
+          </div>
+          <label class="field"><span>Логийн дээд хэмжээ (MB)</span><input type="number" min="0" max="1024" data-bind="cleanup.log_max_mb" /><small>Хэтэрвэл .log.1 болгож сольж хадгална</small></label>
+        </div>
+      </section>
+
+      <!-- self update -->
+      <section class="page" data-page="update">
+        <div class="card">
+          <h3>Өөрөө шинэчлэх</h3>
+          <p class="muted">Агент өөрийн ажиллаж байгаа exe-г дарж бичиж чадахгүй тул GitHub release-ээс суулгагчийг татаж, чимээгүй ажиллуулна — суулгагч нь үйлчилгээг зогсоож, хоёр файлыг сольж, эргүүлж асаана.</p>
+          <label class="field"><span>Горим</span>
+            <select data-bind="update.mode">
+              <option value="off">Off — хэзээ ч шалгахгүй</option>
+              <option value="ask">Ask — мэдэгдээд хүн зөвшөөрнө</option>
+              <option value="auto">Auto — өөрөө суулгана</option>
+            </select>
+            <small>Анхдагч нь Ask: зогсоол өдөржин ажилладаг тул хүлээгээгүй үед дахин ачаалахаас сэргийлнэ.</small>
+          </label>
+          <label class="field"><span>GitHub repo</span><input type="text" data-bind="update.github_repo" placeholder="owner/name" /><small>Хоосон бол шинэчлэлт бүрэн унтраалттай</small></label>
+          <label class="field"><span>GitHub token</span><input type="password" data-bind="update.github_token" placeholder="хувийн repo бол л шаардлагатай" /></label>
+          <div class="field-row">
+            <label class="field"><span>Шалгах давтамж (цаг)</span><input type="number" min="1" max="168" data-bind="update.check_interval_hours" /></label>
+            <label class="field"><span>Цонх <i>(auto үед)</i></span><input type="text" data-bind="update.window" placeholder="02:00-05:00" /><small>Хоосон = хэзээ ч болно</small></label>
+          </div>
+        </div>
       </section>
 
       <!-- log viewer -->
@@ -340,6 +421,11 @@
       <label class="field"><span>Харагдах нэр</span><input type="text" data-k="label" placeholder="хоосон = SCM нэр" /></label>
     </div>
     <label class="toggle"><input type="checkbox" data-k="must_run" /><span class="sw"></span><div><b>Ажиллахгүй бол Critical</b></div></label>
+    <label class="toggle"><input type="checkbox" data-k="auto_restart" /><span class="sw"></span><div><b>Зогсвол автоматаар асаах</b><small>Windows-ийн сэргээлт барихгүй тохиолдлыг нөхнө</small></div></label>
+    <div class="field-row">
+      <label class="field"><span>Цагт дээд тал нь</span><input type="number" min="1" max="20" data-k="max_restarts_per_hour" /><small>Хэтэрвэл зогсоод Critical мэдэгдэнэ</small></label>
+      <label class="field"><span>Хүлээх хугацаа (сек)</span><input type="number" min="10" max="600" data-k="restart_grace_secs" /><small>Асаалт амжилттай эсэхийг шалгах хугацаа</small></label>
+    </div>
   </div>
 </template>
 
@@ -362,6 +448,18 @@
   </div>
 </template>
 
+<template id="tpl-port">
+  <div class="card item">
+    <div class="item-head"><b class="item-title">Порт</b><button class="icon-btn remove" title="Устгах">×</button></div>
+    <div class="field-row">
+      <label class="field"><span>Порт</span><input type="number" min="1" max="65535" data-k="port" placeholder="37777" /></label>
+      <label class="field"><span>Тайлбар</span><input type="text" data-k="label" placeholder="Dahua SDK" /></label>
+    </div>
+    <label class="field"><span>Хост</span><input type="text" data-k="host" placeholder="127.0.0.1" /></label>
+    <label class="toggle"><input type="checkbox" data-k="must_listen" /><span class="sw"></span><div><b>Хаалттай бол Critical</b><small>Унтраавал зөвхөн Warning</small></div></label>
+  </div>
+</template>
+
 <template id="tpl-probe">
   <div class="card item">
     <div class="item-head"><b class="item-title">HTTP шалгалт</b><button class="icon-btn remove" title="Устгах">×</button></div>
@@ -373,6 +471,10 @@
     <div class="field-row">
       <label class="field"><span>Хүлээх текст</span><input type="text" data-k="expect" placeholder="OK" /></label>
       <label class="field"><span>Timeout (сек)</span><input type="number" min="1" max="60" data-k="timeout_secs" /></label>
+    </div>
+    <div class="field-row">
+      <label class="field"><span>Сэргээх үйлчилгээ <i>(заавал биш)</i></span><input type="text" data-k="service" placeholder="DahuaParkingService" /><small>Ажиллаж байгаа ч хариу өгөхгүй бол дахин ачаална</small></label>
+      <label class="field"><span>Хэдэн удаа алдсаны дараа</span><input type="number" min="1" max="20" data-k="restart_after_failures" /><small>Дараалан алдсан тоо</small></label>
     </div>
   </div>
 </template>

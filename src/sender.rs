@@ -46,11 +46,51 @@ struct Heartbeat<'a> {
     queue_length: usize,
     services: Vec<serde_json::Value>,
     health: serde_json::Value,
+    /// Restarts the agent performed in the last rolling hour, per service.
+    /// Lets the dashboard show "healed 2×" without replaying the event stream.
+    #[serde(rename = "sergeelt", skip_serializing_if = "serde_json::Value::is_null")]
+    heals: serde_json::Value,
+    #[serde(rename = "suljee", skip_serializing_if = "serde_json::Value::is_null")]
+    network: serde_json::Value,
+    #[serde(rename = "portuud", skip_serializing_if = "Vec::is_empty")]
+    ports: Vec<serde_json::Value>,
+    #[serde(rename = "tsag", skip_serializing_if = "serde_json::Value::is_null")]
+    clock: serde_json::Value,
+}
+
+/// Everything the heartbeat carries besides identity. Grouped rather than
+/// passed positionally — the list keeps growing, and five same-typed
+/// `serde_json::Value` arguments in a row is a bug waiting to happen.
+#[derive(Default)]
+pub struct HeartbeatData {
+    pub services: Vec<serde_json::Value>,
+    pub health: serde_json::Value,
+    pub heals: serde_json::Value,
+    pub network: serde_json::Value,
+    pub ports: Vec<serde_json::Value>,
+    pub clock: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize, Default)]
 struct QueueFile {
     events: Vec<DetectorEvent>,
+}
+
+/// One instruction handed down in a heartbeat response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Tushaal {
+    pub id: String,
+    pub turul: String,
+    #[serde(default)]
+    pub tulkhuur: String,
+    #[serde(default)]
+    pub parametr: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct HeartbeatKhariu {
+    #[serde(default)]
+    tushaal: Vec<Tushaal>,
 }
 
 pub struct Sender {
@@ -61,6 +101,8 @@ pub struct Sender {
     pending: Vec<DetectorEvent>,
     queue_path: PathBuf,
     started: std::time::Instant,
+    /// Atomic because heartbeat records failures through `&self`.
+    disconnects: std::sync::atomic::AtomicU64,
 }
 
 pub const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -92,6 +134,7 @@ impl Sender {
             pending,
             queue_path,
             started: std::time::Instant::now(),
+            disconnects: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -172,7 +215,7 @@ impl Sender {
             };
 
             match self.post(&url, &payload).await {
-                Ok(()) => {
+                Ok(_) => {
                     self.pending.drain(0..take);
                     self.persist();
                 }
@@ -188,7 +231,16 @@ impl Sender {
         }
     }
 
-    pub async fn heartbeat(&self, services: Vec<serde_json::Value>, health: serde_json::Value) {
+    /// Failed uploads and heartbeats since start — the network score's
+    /// "disconnects" figure, and the only number here that reflects whether
+    /// our own traffic is actually landing.
+    pub fn disconnects(&self) -> u64 {
+        self.disconnects.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Sends the heartbeat and returns whatever commands came back with it.
+    pub async fn heartbeat(&self, data: HeartbeatData) -> Vec<Tushaal> {
+        let HeartbeatData { services, health, heals, network, ports, clock } = data;
         let url = format!("{}/detector/heartbeat", self.server.url);
         let body = Heartbeat {
             agent: &self.agent.name,
@@ -201,13 +253,40 @@ impl Sender {
             queue_length: self.pending.len(),
             services,
             health,
+            heals,
+            network,
+            ports,
+            clock,
         };
-        if let Err(e) = self.post(&url, &body).await {
-            log::debug!("Heartbeat failed: {e}");
+        match self.post(&url, &body).await {
+            Ok(text) => match serde_json::from_str::<HeartbeatKhariu>(&text) {
+                Ok(khariu) => khariu.tushaal,
+                // Older servers answer with the bare string "Amjilttai", which
+                // is simply "no commands" — not an error worth logging loudly.
+                Err(_) => Vec::new(),
+            },
+            Err(e) => {
+                log::debug!("Heartbeat failed: {e}");
+                self.disconnects.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Vec::new()
+            }
         }
     }
 
-    async fn post<T: Serialize>(&self, url: &str, body: &T) -> anyhow::Result<()> {
+    /// Reports the outcome of one command back to the server.
+    pub async fn tushaal_khariu(&self, id: &str, amjilttai: bool, ur_dun: &str, aldaa: &str) {
+        let url = format!("{}/detector/tushaal/{id}/khariu", self.server.url);
+        let body = serde_json::json!({
+            "amjilttai": amjilttai,
+            "urDun": crate::event::truncate(ur_dun, 4000),
+            "aldaa": crate::event::truncate(aldaa, 2000),
+        });
+        if let Err(e) = self.post(&url, &body).await {
+            log::warn!("Could not report command {id}: {e}");
+        }
+    }
+
+    async fn post<T: Serialize>(&self, url: &str, body: &T) -> anyhow::Result<String> {
         let mut last: Option<String> = None;
 
         for attempt in 0..self.server.retry_count.max(1) {
@@ -227,7 +306,7 @@ impl Sender {
                 Ok(resp) => {
                     let status = resp.status();
                     if status.is_success() {
-                        return Ok(());
+                        return Ok(resp.text().await.unwrap_or_default());
                     }
                     // 4xx is our bug, not a network blip — retrying will not fix
                     // a malformed payload, so fail fast and keep the queue.

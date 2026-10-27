@@ -20,11 +20,27 @@ struct Flag {
     since: Instant,
 }
 
+/// A probe that has failed enough times in a row that the service behind it
+/// should be bounced.
+#[derive(Debug, Clone)]
+pub struct Wedged {
+    /// SCM name of the service to restart.
+    pub service: String,
+    /// Probe that noticed, for the event text.
+    pub probe: String,
+    pub failures: u32,
+}
+
 pub struct HealthCollector {
     cfg: HealthConfig,
     flags: HashMap<String, Flag>,
     client: reqwest::Client,
     last_snapshot: serde_json::Value,
+    /// Consecutive failures per probe name. Reset the moment it answers again,
+    /// so one dropped request never accumulates toward a restart.
+    probe_failures: HashMap<String, u32>,
+    /// Filled in by each `poll()`; drained by the healer.
+    wedged: Vec<Wedged>,
 }
 
 impl HealthCollector {
@@ -40,7 +56,30 @@ impl HealthCollector {
             flags: HashMap::new(),
             client,
             last_snapshot: serde_json::json!({}),
+            probe_failures: HashMap::new(),
+            wedged: Vec::new(),
         }
+    }
+
+    /// Services whose endpoint has been unanswered long enough to warrant a
+    /// restart, as of the last `poll()`.
+    pub fn wedged(&self) -> &[Wedged] {
+        &self.wedged
+    }
+
+    /// Fullest disk seen on the last poll, as a used percentage. Drives the
+    /// cleanup trigger, so it reads from the snapshot rather than re-scanning.
+    pub fn worst_disk_percent(&self) -> f32 {
+        self.last_snapshot
+            .get("disks")
+            .and_then(|d| d.as_array())
+            .map(|disks| {
+                disks
+                    .iter()
+                    .filter_map(|d| d.get("usedPercent").and_then(|v| v.as_f64()))
+                    .fold(0.0f64, f64::max) as f32
+            })
+            .unwrap_or(0.0)
     }
 
     /// Returns Some(event) when the key's state changed or the reminder is due.
@@ -209,6 +248,7 @@ impl HealthCollector {
     async fn poll_http(&mut self) -> Vec<DetectorEvent> {
         let probes = self.cfg.http.clone();
         let mut out = Vec::new();
+        self.wedged.clear();
 
         for probe in probes {
             let started = Instant::now();
@@ -241,6 +281,28 @@ impl HealthCollector {
                     }
                 }
             };
+
+            // A service can sit at `Running` in the SCM while its listener is
+            // wedged; consecutive unanswered probes are the only evidence of
+            // that, so they are counted separately from the reporting edge.
+            let streak = if bad {
+                let n = self.probe_failures.entry(probe.name.clone()).or_insert(0);
+                *n += 1;
+                *n
+            } else {
+                self.probe_failures.remove(&probe.name);
+                0
+            };
+            if bad
+                && !probe.service.is_empty()
+                && streak >= probe.restart_after_failures.max(1)
+            {
+                self.wedged.push(Wedged {
+                    service: probe.service.clone(),
+                    probe: probe.name.clone(),
+                    failures: streak,
+                });
+            }
 
             let ms = started.elapsed().as_millis() as u64;
             let key = format!("http:{}", probe.name);

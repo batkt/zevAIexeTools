@@ -29,6 +29,52 @@ Everything is classified **Critical / Warning / Info**, de-duplicated by
 fingerprint before it leaves the machine, queued to disk when the network is
 down, and shipped in batches.
 
+## Self-healing
+
+A watched service found stopped is started again, and the attempt is reported
+like any other event (`heal/restarting` → `heal/restarted` or `heal/failed`).
+
+This is not what the SCM's failure actions already do. Those only fire when a
+service **crashes**. A service that exited cleanly, was stopped by something
+else, or that the SCM has already exhausted its retries on stays down until a
+human notices — which on an unattended parking PC can be days.
+
+Two rules keep it from making things worse:
+
+- **It never fights the SCM.** Anything mid-transition (`StartPending` and
+  friends) is left alone, and so is a service that cannot be queried at all —
+  "not installed" is not something a restart fixes.
+- **It gives up loudly.** `max_restarts_per_hour` (default 3) is a rolling-hour
+  ceiling. A service needing a fourth restart in an hour has a real problem, and
+  bouncing it further would bury that under identical events. At the cap the
+  agent stops and reports one Critical (`heal/limit`) asking for a human.
+
+Set `auto_restart = false` on a service to watch it without ever touching it.
+Restart counts for the last hour also ride along on the heartbeat, so the
+dashboard can show "healed 2×" without replaying the event stream.
+
+### Healing a wedged service
+
+Point a health probe at the service behind it:
+
+```toml
+[[health.http]]
+name                   = "dahua api"
+url                    = "http://127.0.0.1:5000/api/health"
+service                = "DahuaParkingService"
+restart_after_failures = 3
+```
+
+Now the endpoint going unanswered is not just reported, it is repaired. This
+catches the failure the SCM genuinely cannot see: a process still marked
+`Running` whose listener has wedged. Because the process is alive, starting it
+would do nothing — the agent stops it first, waits for it to actually go down,
+then starts it.
+
+Probe-driven and crash-driven restarts share one state machine and **one**
+`max_restarts_per_hour` budget, so a service cannot quietly be bounced three
+times by each.
+
 ## Install
 
 Run `Zev-Detector-Setup-1.0.0.exe` and click through it. It installs both
@@ -108,6 +154,109 @@ python -m http.server 5175 --directory ui
 `ui/mock.js` notices that `window.__TAURI__` is missing and answers every
 command with fixture data; inside the real app it does nothing. Add `?fresh=1`
 to the URL to preview the first-run wizard.
+
+## Network quality
+
+Each machine gets a 0–100 score from latency, packet loss, and how many of its
+own uploads have failed. Two measurement choices worth knowing, both about
+Windows realities:
+
+- **Loss comes from `ping`'s exit code, not its output.** `ping.exe` prints
+  `Lost = 0 (0% loss)` in English but *translates that text* on a localised
+  Windows — scraping it silently breaks on exactly the machines this runs on.
+  Exit codes mean the same thing in every language.
+- **Latency is measured in-process**, as a TCP connect to the server the agent
+  actually talks to. Spawning `ping.exe` costs 5–15 ms, which is the same order
+  as the number being measured.
+
+A network that blocks ICMP reports loss as **unknown**, not as 100% — a firewall
+dropping ping says nothing about whether uploads are working. The score still
+gets computed from latency alone. An entirely offline machine scores `null`
+rather than 0, so "connected but terrible" and "not there" stay distinguishable.
+
+Each penalty is capped, so one bad metric can't zero the score and hide the
+others. Reporting is edge-triggered on the threshold, so a permanently mediocre
+link doesn't file a report every five minutes.
+
+## Local ports
+
+```toml
+[[ports]]
+port  = 37777
+label = "Dahua SDK"
+```
+
+A service can sit at `Running` while its listener never came up — a port bind
+that lost a race, or a firewall rule someone else added. Checking the port
+directly is what catches that. `must_listen = false` downgrades a closed port
+from Critical to Warning.
+
+## Clock drift
+
+Measured against **our own API's `Date` header**, not an NTP pool — that server
+is the authority that matters, since it validates the agent's JWT and stores the
+timestamps events are ordered by. A machine that agrees with `pool.ntp.org` but
+not with udirdlagaBack still produces broken data. Network latency puts a floor
+on accuracy, so the threshold is deliberately coarse: this looks for a clock that
+is *wrong*, not one a few hundred milliseconds out.
+
+With `auto_resync = true` it runs `w32tm /resync`, starting the Windows Time
+service first if it is stopped (common on workgroup kiosks). Resyncs are capped
+at one per 30 minutes: a clock that drifts straight back has a hardware or domain
+problem, and resyncing every poll would hide that while repeatedly moving time
+under whatever is running.
+
+## Disk cleanup
+
+The only part of the agent that deletes anything, running unattended as
+LocalSystem — so it is built to refuse rather than to free the most space:
+
+- **The roots are hardcoded**, not configurable: Windows `Temp`, `Minidump`,
+  `SoftwareDistribution\Download`, LocalSystem's `TEMP`, `CrashDumps`. A typo in
+  a config file cannot point this at `C:\`.
+- **Every candidate is re-checked against its root after canonicalising, and
+  reparse points are never followed or deleted.** `C:\Windows\Temp` can contain a
+  junction to anywhere on the disk; without that check, walking it would delete
+  the target.
+- **Nothing newer than `min_age_days`** (default 7), so a temp file an installer
+  is using right now survives.
+- **Files only.** Directories stay; an empty temp folder costs nothing, and
+  deleting trees is where this kind of code goes wrong.
+- **Browser caches are deliberately excluded** — clearing them signs the kiosk
+  browser out of whatever it was logged into.
+
+Runs weekly at the configured hour, plus an emergency pass when a disk crosses
+`disk_trigger_percent`, at most once per calendar day so a disk that stays full
+cannot cause a loop. `tsevejluulekh` with `{"dry": true}` reports what it *would*
+delete without touching anything.
+
+## Diagnostics
+
+Ten read-only checks, runnable per machine from the dashboard: `diagPing`,
+`diagDns`, `diagApi`, `diagPort`, `diagCamera`, `diagGateway`, `diagWebsocket`,
+`diagService`, `diagDisk`, `diagEvents`. They connect, resolve and query —
+nothing starts, stops, writes or deletes, which is why they need none of the
+confirmation the control commands do. Every external tool is invoked with an
+argument list, never a shell string.
+
+## Updating itself
+
+```toml
+[update]
+mode        = "ask"          # off | ask | auto
+github_repo = "owner/name"   # required; nothing happens without it
+window      = "02:00-05:00"  # auto mode only
+```
+
+The agent cannot overwrite its own running exe, so it does not try: it downloads
+the **installer** from a GitHub release and runs it silently, and the installer
+stops the service, replaces both binaries and puts it back.
+
+Version comparison is numeric, not textual — `1.10.0` really is newer than
+`1.9.0`, which a string compare gets backwards and would silently stop every
+update after 1.9. A tag that isn't a version (`nightly`) never counts as newer.
+The asset digest is verified **before** the installer is executed, since it runs
+elevated; with no digest published, the full byte count must at least match.
 
 ## Files it creates
 
