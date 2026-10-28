@@ -278,6 +278,19 @@ async fn list_installed_services() -> Vec<InstalledServiceInfo> {
     .unwrap_or_default()
 }
 
+#[tauri::command]
+async fn check_update() -> Result<zev_detector::update::UpdateCheckResult, String> {
+    let cfg = Config::load_or_default();
+    zev_detector::update::check_update(&cfg.update).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn apply_update() -> Result<String, String> {
+    let cfg = Config::load_or_default();
+    let mut updater = zev_detector::update::Updater::new(cfg.update.clone());
+    updater.install_latest().await.map_err(|e| e.to_string())
+}
+
 /// Brings the main window back from the tray.
 fn show_main_window(app: &tauri::AppHandle) {
     use tauri::Manager;
@@ -307,6 +320,8 @@ fn main() {
             dahua_status,
             dahua_action,
             list_installed_services,
+            check_update,
+            apply_update,
         ])
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Нээх", true, None::<&str>)?;

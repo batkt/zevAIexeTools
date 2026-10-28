@@ -69,6 +69,32 @@ fn main() {
                 Err(e) => eprintln!("Speedtest failed: {e}"),
             }
         }
+        Some("check-update") => {
+            println!("GitHub release шалгаж байна (batkt/zevAIexeTools)...");
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let cfg = Config::load_or_default();
+            match rt.block_on(zev_detector::update::check_update(&cfg.update)) {
+                Ok(res) => {
+                    println!("Одоогийн хувилбар: v{}", res.current_version);
+                    println!("GitHub хувилбар : v{}", res.latest_version);
+                    println!("Шинэчлэлт байгаа: {}", if res.has_update { "Тийм" } else { "Үгүй (Хамгийн сүүлийнх)" });
+                    if !res.asset_name.is_empty() {
+                        println!("Файл           : {} ({} bytes)", res.asset_name, res.size_bytes);
+                    }
+                }
+                Err(e) => eprintln!("Шалгахад алдаа гарлаа: {e}"),
+            }
+        }
+        Some("apply-update") => {
+            println!("GitHub release-ээс татаж шинэчилж байна...");
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let cfg = Config::load_or_default();
+            let mut updater = zev_detector::update::Updater::new(cfg.update.clone());
+            match rt.block_on(updater.install_latest()) {
+                Ok(msg) => println!("Амжилттай: {msg}"),
+                Err(e) => eprintln!("Шинэчлэхэд алдаа гарлаа: {e}"),
+            }
+        }
         Some("run") => run_interactive(),
         Some("test") => run_test(),
         Some("--version") | Some("-v") => println!("zev-detector {}", sender::AGENT_VERSION),

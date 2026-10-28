@@ -352,20 +352,26 @@
       <section class="page" data-page="update">
         <div class="card">
           <h3>Өөрөө шинэчлэх</h3>
-          <p class="muted">Агент өөрийн ажиллаж байгаа exe-г дарж бичиж чадахгүй тул GitHub release-ээс суулгагчийг татаж, чимээгүй ажиллуулна — суулгагч нь үйлчилгээг зогсоож, хоёр файлыг сольж, эргүүлж асаана.</p>
-          <label class="field"><span>Горим</span>
-            <select data-bind="update.mode">
-              <option value="off">Off — хэзээ ч шалгахгүй</option>
-              <option value="ask">Ask — мэдэгдээд хүн зөвшөөрнө</option>
-              <option value="auto">Auto — өөрөө суулгана</option>
-            </select>
-            <small>Анхдагч нь Ask: зогсоол өдөржин ажилладаг тул хүлээгээгүй үед дахин ачаалахаас сэргийлнэ.</small>
-          </label>
-          <label class="field"><span>GitHub repo</span><input type="text" data-bind="update.github_repo" placeholder="owner/name" /><small>Хоосон бол шинэчлэлт бүрэн унтраалттай</small></label>
-          <label class="field"><span>GitHub token</span><input type="password" data-bind="update.github_token" placeholder="хувийн repo бол л шаардлагатай" /></label>
-          <div class="field-row">
-            <label class="field"><span>Шалгах давтамж (цаг)</span><input type="number" min="1" max="168" data-bind="update.check_interval_hours" /></label>
-            <label class="field"><span>Цонх <i>(auto үед)</i></span><input type="text" data-bind="update.window" placeholder="02:00-05:00" /><small>Хоосон = хэзээ ч болно</small></label>
+          <p class="muted">GitHub release-ээс хамгийн сүүлийн хувилбарыг автоматаар шалгаж, шинэ хувилбарыг чимээгүй горимоор шинэчилнэ.</p>
+
+          <div class="field-row" style="margin-top: 14px;">
+            <div class="field">
+              <span>Одоогийн хувилбар</span>
+              <div id="update-current-ver" style="font-size: 1.15rem; font-weight: 600; font-family: monospace; color: var(--accent); padding: 4px 0;">v1.5.0</div>
+            </div>
+            <div class="field">
+              <span>Сүүлийн хувилбар</span>
+              <div id="update-latest-ver" style="font-size: 1.15rem; font-weight: 600; font-family: monospace; color: var(--fg); padding: 4px 0;">—</div>
+            </div>
+          </div>
+
+          <div id="update-status-box" style="margin: 14px 0; padding: 12px 14px; border-radius: 8px; background: rgba(0,0,0,0.03); font-size: 0.9rem; border: 1px solid var(--border); line-height: 1.5;">
+            "Шинэчлэлт шалгах" товчийг дарж GitHub дээрх сүүлийн хувилбарыг шалгана уу.
+          </div>
+
+          <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px;">
+            <button class="btn primary" id="btn-check-update">Шинэчлэлт шалгах ⟳</button>
+            <button class="btn" id="btn-apply-update" style="display: none; background: #16a34a; color: #fff;">Шинэчлэх ⬇</button>
           </div>
         </div>
       </section>

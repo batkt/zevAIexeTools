@@ -202,8 +202,8 @@ impl Updater {
 
     /// The newest release newer than us, with its installer asset.
     async fn latest(&self) -> anyhow::Result<Option<(Available, Asset)>> {
-        let repo = self.cfg.github_repo.trim().trim_matches('/');
-        let url = format!("https://api.github.com/repos/{repo}/releases/latest");
+        let repo = normalize_repo(&self.cfg.github_repo);
+        let url = format!("https://api.github.com/repos/{repo}/releases");
 
         let mut req = self
             .client
@@ -216,43 +216,38 @@ impl Updater {
 
         let resp = req.send().await?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            // Also what a private repo without a token looks like.
-            anyhow::bail!("{repo}: release олдсонгүй (хувийн repo бол github_token нэмнэ)");
+            anyhow::bail!("{repo}: release олдсонгүй");
         }
         if !resp.status().is_success() {
             anyhow::bail!("GitHub HTTP {}", resp.status());
         }
 
-        let release: Release = resp.json().await?;
-        if release.draft || release.prerelease {
-            return Ok(None);
-        }
-        let version = if release.tag_name.is_empty() { release.name.clone() } else { release.tag_name.clone() };
-        if !is_newer(&version, crate::sender::AGENT_VERSION) {
-            return Ok(None);
+        let releases: Vec<Release> = resp.json().await?;
+        for release in releases {
+            if release.draft || release.prerelease {
+                continue;
+            }
+            if let Some(asset) = release
+                .assets
+                .iter()
+                .find(|a| a.name.to_lowercase().ends_with(".exe"))
+            {
+                let version = extract_version(&release.tag_name, &release.name, &asset.name);
+                if is_newer(&version, crate::sender::AGENT_VERSION) {
+                    return Ok(Some((
+                        Available {
+                            version: version.trim_start_matches('v').to_string(),
+                            notes: release.body.clone(),
+                            asset_name: asset.name.clone(),
+                            size: asset.size,
+                        },
+                        asset.clone(),
+                    )));
+                }
+            }
         }
 
-        // The installer, not a zip of loose exes — it is what knows how to stop
-        // the service and put it back.
-        let asset = release
-            .assets
-            .iter()
-            .find(|a| {
-                let n = a.name.to_lowercase();
-                n.ends_with(".exe") && n.contains("setup")
-            })
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("{version} release-д Setup .exe байхгүй"))?;
-
-        Ok(Some((
-            Available {
-                version: version.trim_start_matches('v').to_string(),
-                notes: release.body.clone(),
-                asset_name: asset.name.clone(),
-                size: asset.size,
-            },
-            asset,
-        )))
+        Ok(None)
     }
 
     async fn install(&mut self, available: Available, asset: Asset) -> Vec<DetectorEvent> {
@@ -348,6 +343,108 @@ impl Updater {
         }
         Ok(resp.bytes().await?.to_vec())
     }
+}
+
+pub fn normalize_repo(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "batkt/zevAIexeTools".to_string();
+    }
+    let mut s = trimmed;
+    if let Some(pos) = s.find("github.com/") {
+        s = &s[pos + "github.com/".len()..];
+    }
+    let clean = s.trim_end_matches(".git").trim_matches('/');
+    if clean.contains('/') {
+        clean.to_string()
+    } else {
+        "batkt/zevAIexeTools".to_string()
+    }
+}
+
+pub fn extract_version(tag: &str, name: &str, asset: &str) -> String {
+    for candidate in [tag, name, asset] {
+        let trimmed = candidate.trim().trim_start_matches('v');
+        let parts: Vec<&str> = trimmed
+            .split(|c: char| !c.is_ascii_digit() && c != '.')
+            .filter(|p| !p.is_empty() && p.contains('.') && p.chars().any(|c| c.is_ascii_digit()))
+            .collect();
+        if let Some(v) = parts.first() {
+            let clean = v.trim_matches('.');
+            if clean.chars().any(|c| c.is_ascii_digit()) {
+                return clean.to_string();
+            }
+        }
+    }
+    tag.trim().to_string()
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheckResult {
+    pub current_version: String,
+    pub latest_version: String,
+    pub has_update: bool,
+    pub asset_name: String,
+    pub size_bytes: u64,
+    pub notes: String,
+    pub published_at: String,
+}
+
+pub async fn check_update(cfg: &UpdateConfig) -> anyhow::Result<UpdateCheckResult> {
+    let repo = normalize_repo(&cfg.github_repo);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .user_agent(format!("zev-detector/{}", crate::sender::AGENT_VERSION))
+        .build()?;
+
+    let url = format!("https://api.github.com/repos/{repo}/releases");
+    let mut req = client
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28");
+    if !cfg.github_token.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", cfg.github_token));
+    }
+
+    let resp = req.send().await?;
+    if !resp.status().is_success() {
+        anyhow::bail!("GitHub HTTP {}", resp.status());
+    }
+
+    let releases: Vec<Release> = resp.json().await?;
+    for release in releases {
+        if release.draft || release.prerelease {
+            continue;
+        }
+        if let Some(asset) = release
+            .assets
+            .iter()
+            .find(|a| a.name.to_lowercase().ends_with(".exe"))
+        {
+            let ver = extract_version(&release.tag_name, &release.name, &asset.name);
+            let has_update = is_newer(&ver, crate::sender::AGENT_VERSION);
+            return Ok(UpdateCheckResult {
+                current_version: crate::sender::AGENT_VERSION.to_string(),
+                latest_version: ver,
+                has_update,
+                asset_name: asset.name.clone(),
+                size_bytes: asset.size,
+                notes: release.body.clone(),
+                published_at: release.tag_name.clone(),
+            });
+        }
+    }
+
+    Ok(UpdateCheckResult {
+        current_version: crate::sender::AGENT_VERSION.to_string(),
+        latest_version: crate::sender::AGENT_VERSION.to_string(),
+        has_update: false,
+        asset_name: String::new(),
+        size_bytes: 0,
+        notes: "Шинэ хувилбар олдсонгүй.".to_string(),
+        published_at: String::new(),
+    })
 }
 
 #[cfg(test)]

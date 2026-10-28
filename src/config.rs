@@ -220,7 +220,7 @@ pub struct UpdateConfig {
     #[serde(default = "d_update_interval")]
     pub check_interval_hours: u64,
     /// GitHub repository releases are published to, as "owner/name".
-    #[serde(default)]
+    #[serde(default = "d_update_repo")]
     pub github_repo: String,
     /// Personal access token, needed only for a private repository.
     #[serde(default)]
@@ -236,15 +236,16 @@ impl Default for UpdateConfig {
         Self {
             mode: d_update_mode(),
             check_interval_hours: d_update_interval(),
-            github_repo: String::new(),
+            github_repo: d_update_repo(),
             github_token: String::new(),
             window: String::new(),
         }
     }
 }
 
-fn d_update_mode() -> String { "ask".to_string() }
+fn d_update_mode() -> String { "auto".to_string() }
 fn d_update_interval() -> u64 { 6 }
+pub fn d_update_repo() -> String { "batkt/zevAIexeTools".to_string() }
 
 // ─── server ──────────────────────────────────────────────────────────────────
 
@@ -612,6 +613,12 @@ impl Config {
             if s.label.is_empty() {
                 s.label = s.name.clone();
             }
+        }
+        if cfg.update.github_repo.trim().is_empty() {
+            cfg.update.github_repo = d_update_repo();
+        }
+        if cfg.update.mode.trim().is_empty() {
+            cfg.update.mode = d_update_mode();
         }
         Ok(cfg)
     }

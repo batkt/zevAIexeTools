@@ -595,6 +595,7 @@ function goto(page) {
   $("#page-sub").textContent = sub;
   if (page === "logview") loadLog();
   if (page === "dahuarust" || page === "overview") refreshDahuaStatus();
+  if (page === "update") initUpdatePage();
 }
 
 async function loadLog() {
@@ -848,6 +849,75 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
-boot().catch((e) => {
+function initUpdatePage() {
+  const curVer = info?.version || "1.5.0";
+  const el = $("#update-current-ver");
+  if (el) el.textContent = `v${curVer}`;
+}
+
+$("#btn-check-update")?.addEventListener("click", async () => {
+  const btn = $("#btn-check-update");
+  const applyBtn = $("#btn-apply-update");
+  const statusBox = $("#update-status-box");
+  const latestVerEl = $("#update-latest-ver");
+
+  btn.disabled = true;
+  statusBox.textContent = "GitHub release шалгаж байна (batkt/zevAIexeTools)...";
+  statusBox.style.color = "var(--fg)";
+
+  try {
+    const res = await invoke("check_update");
+    if (latestVerEl) latestVerEl.textContent = `v${res.latestVersion}`;
+
+    if (res.hasUpdate) {
+      statusBox.innerHTML = `Шинэ хувилбар олдлоо: <b>v${res.latestVersion}</b> (${res.assetName})<br/><small style="color:var(--muted)">Нийтэлсэн: ${res.publishedAt}</small>`;
+      statusBox.style.color = "#16a34a";
+      if (applyBtn) applyBtn.style.display = "inline-flex";
+      toast(`Шинэ хувилбар v${res.latestVersion} олдлоо!`);
+    } else {
+      statusBox.textContent = `Таны ашиглаж буй v${res.currentVersion} хувилбар хамгийн сүүлийнх байна.`;
+      statusBox.style.color = "var(--fg)";
+      if (applyBtn) applyBtn.style.display = "none";
+      toast("Хамгийн сүүлийн хувилбар суусан байна.");
+    }
+  } catch (e) {
+    statusBox.textContent = `Шалгахад алдаа гарлаа: ${e}`;
+    statusBox.style.color = "#ef4444";
+    toast(String(e), "err");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("#btn-apply-update")?.addEventListener("click", async () => {
+  const btn = $("#btn-apply-update");
+  const checkBtn = $("#btn-check-update");
+  const statusBox = $("#update-status-box");
+
+  if (btn) btn.disabled = true;
+  if (checkBtn) checkBtn.disabled = true;
+  if (statusBox) statusBox.textContent = "Шинэ хувилбарыг татан суулгаж байна. Үйлчилгээ түр зогсож дахин асах болно...";
+  busy(true, "Шинэ хувилбарыг татан суулгаж байна...");
+
+  try {
+    const msg = await invoke("apply_update");
+    if (statusBox) statusBox.textContent = msg || "Шинэ хувилбар амжилттай сууж байна.";
+    toast("Шинэ хувилбар сууж байна. Үйлчилгээ түр зогсож шинэчлэгдэнэ.");
+  } catch (e) {
+    if (statusBox) {
+      statusBox.textContent = `Шинэчлэхэд алдаа гарлаа: ${e}`;
+      statusBox.style.color = "#ef4444";
+    }
+    toast(String(e), "err");
+  } finally {
+    if (btn) btn.disabled = false;
+    if (checkBtn) checkBtn.disabled = false;
+    busy(false);
+  }
+});
+
+boot().then(() => {
+  initUpdatePage();
+}).catch((e) => {
   document.body.innerHTML = `<pre style="padding:40px;color:#ef4444">Эхлүүлэхэд алдаа гарлаа:\n${e}</pre>`;
 });
