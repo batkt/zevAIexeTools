@@ -296,33 +296,73 @@ impl LocalNotifier {
 
 #[cfg(windows)]
 mod platform {
+    use std::path::PathBuf;
     use std::process::Command;
+    use base64::Engine;
 
-    const MB_OK: u32 = 0x00000000;
     const MB_ICONERROR: u32 = 0x00000010;
     const MB_ICONWARNING: u32 = 0x00000030;
-    const MB_TOPMOST: u32 = 0x00040000;
-    const MB_SETFOREGROUND: u32 = 0x00010000;
+
+    #[repr(C)]
+    #[allow(non_snake_case)]
+    struct STARTUPINFOW {
+        cb: u32,
+        lpReserved: *mut u16,
+        lpDesktop: *mut u16,
+        lpTitle: *mut u16,
+        dwX: u32,
+        dwY: u32,
+        dwXSize: u32,
+        dwYSize: u32,
+        dwXCountChars: u32,
+        dwYCountChars: u32,
+        dwFillAttribute: u32,
+        dwFlags: u32,
+        wShowWindow: u16,
+        cbReserved2: u16,
+        lpReserved2: *mut u8,
+        hStdInput: *mut std::ffi::c_void,
+        hStdOutput: *mut std::ffi::c_void,
+        hStdError: *mut std::ffi::c_void,
+    }
+
+    #[repr(C)]
+    #[allow(non_snake_case)]
+    struct PROCESS_INFORMATION {
+        hProcess: *mut std::ffi::c_void,
+        hThread: *mut std::ffi::c_void,
+        dwProcessId: u32,
+        dwThreadId: u32,
+    }
 
     #[link(name = "wtsapi32")]
     extern "system" {
-        fn WTSSendMessageW(
-            hServer: isize,
-            SessionId: u32,
-            pTitle: *const u16,
-            TitleLength: u32,
-            pMessage: *const u16,
-            MessageLength: u32,
-            Style: u32,
-            Timeout: u32,
-            pResponse: *mut u32,
-            bWait: i32,
-        ) -> i32;
+        fn WTSGetActiveConsoleSessionId() -> u32;
+        fn WTSQueryUserToken(SessionId: u32, phToken: *mut *mut std::ffi::c_void) -> i32;
     }
 
     #[link(name = "kernel32")]
     extern "system" {
-        fn WTSGetActiveConsoleSessionId() -> u32;
+        fn ProcessIdToSessionId(dwProcessId: u32, pSessionId: *mut u32) -> i32;
+        fn GetCurrentProcessId() -> u32;
+        fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
+    }
+
+    #[link(name = "advapi32")]
+    extern "system" {
+        fn CreateProcessAsUserW(
+            hToken: *mut std::ffi::c_void,
+            lpApplicationName: *const u16,
+            lpCommandLine: *mut u16,
+            lpProcessAttributes: *mut std::ffi::c_void,
+            lpThreadAttributes: *mut std::ffi::c_void,
+            bInheritHandles: i32,
+            dwCreationFlags: u32,
+            lpEnvironment: *mut std::ffi::c_void,
+            lpCurrentDirectory: *const u16,
+            lpStartupInfo: *mut STARTUPINFOW,
+            lpProcessInformation: *mut PROCESS_INFORMATION,
+        ) -> i32;
     }
 
     #[link(name = "user32")]
@@ -337,10 +377,24 @@ mod platform {
         }
     }
 
+    fn ensure_alert_script() -> PathBuf {
+        let candidate = crate::config::Config::data_dir().join("show_alert.ps1");
+        if candidate.exists() {
+            return candidate;
+        }
+        let pdata = PathBuf::from(r"C:\ProgramData\Zev Detector");
+        let _ = std::fs::create_dir_all(&pdata);
+        let pdata_script = pdata.join("show_alert.ps1");
+        if !pdata_script.exists() {
+            const EMBEDDED_SCRIPT: &str = include_str!("../show_alert.ps1");
+            let _ = std::fs::write(&pdata_script, EMBEDDED_SCRIPT);
+        }
+        pdata_script
+    }
+
     /// Delivers an interactive modern ParkEase alert popup onto the
-    /// active desktop, falling back to WTSSendMessageW if script not present.
+    /// active desktop using the new modern UI card design.
     pub fn show_session_popup(title: &str, message: &str, is_critical: bool) {
-        // 1. Try modern ParkEase WPF card popup
         let (desc, advice) = if let Some((m, a)) = message.split_once("\n\nЗөвлөмж: ") {
             (m, a)
         } else {
@@ -348,71 +402,86 @@ mod platform {
         };
         let severity_str = if is_critical { "Critical" } else { "Warning" };
 
-        let ps_script = crate::config::Config::data_dir().join("show_alert.ps1");
-        let fallback_script = std::path::PathBuf::from(r"C:\ProgramData\Zev Detector\show_alert.ps1");
-        let target_script = if ps_script.exists() {
-            Some(ps_script)
-        } else if fallback_script.exists() {
-            Some(fallback_script)
-        } else {
-            None
-        };
+        let script = ensure_alert_script();
+        let script_str = script.to_string_lossy();
 
-        if let Some(script) = target_script {
-            let t = title.to_string();
-            let d = desc.to_string();
-            let a = advice.to_string();
-            std::thread::spawn(move || {
-                let _ = std::process::Command::new("powershell")
-                    .args([
-                        "-NoProfile",
-                        "-ExecutionPolicy", "Bypass",
-                        "-WindowStyle", "Hidden",
-                        "-File", &script.to_string_lossy(),
-                        "-Title", &t,
-                        "-Message", &d,
-                        "-Advice", &a,
-                        "-Severity", severity_str,
-                        "-TimeoutSecs", "25",
-                    ])
-                    .spawn();
-            });
-            return;
-        }
+        // Encode the PowerShell command into UTF-16LE Base64 so it is 100% immune to escaping issues
+        let ps_code = format!(
+            "& '{}' -Title '{}' -Message '{}' -Advice '{}' -Severity '{}' -TimeoutSecs 25",
+            script_str.replace('\'', "''"),
+            title.replace('\'', "''"),
+            desc.replace('\'', "''"),
+            advice.replace('\'', "''"),
+            severity_str
+        );
+        let utf16_bytes: Vec<u8> = ps_code.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&utf16_bytes);
 
-        // 2. Fallback to native Win32 WTSSendMessageW
         let session_id = unsafe { WTSGetActiveConsoleSessionId() };
-        if session_id == 0xFFFF_FFFF {
-            return;
-        }
+        let mut current_sess: u32 = 0;
+        unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut current_sess) };
 
-        let title_w: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
-        let msg_w: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
-
-        let icon = if is_critical { MB_ICONERROR } else { MB_ICONWARNING };
-        let style = MB_OK | icon | MB_TOPMOST | MB_SETFOREGROUND;
-
-        let title_len = (title_w.len() * 2) as u32;
-        let msg_len = (msg_w.len() * 2) as u32;
+        let t = title.to_string();
+        let d = desc.to_string();
 
         std::thread::spawn(move || {
-            let mut response: u32 = 0;
-            let res = unsafe {
-                WTSSendMessageW(
-                    0, // WTS_CURRENT_SERVER_HANDLE
-                    session_id,
-                    title_w.as_ptr(),
-                    title_len,
-                    msg_w.as_ptr(),
-                    msg_len,
-                    style,
-                    25, // timeout seconds
-                    &mut response,
-                    0, // async
-                )
-            };
-            if res == 0 {
-                log::debug!("WTSSendMessageW returned 0 (user might be locked or switching)");
+            // Case A: Running as Session 0 Windows Service (LocalSystem)
+            if current_sess == 0 && session_id != 0xFFFF_FFFF {
+                let mut user_token: *mut std::ffi::c_void = std::ptr::null_mut();
+                if unsafe { WTSQueryUserToken(session_id, &mut user_token) } != 0 {
+                    let cmd = format!(
+                        "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {b64}"
+                    );
+                    let mut cmd_w: Vec<u16> = cmd.encode_utf16().chain(std::iter::once(0)).collect();
+                    let mut desktop: Vec<u16> = "winsta0\\default".encode_utf16().chain(std::iter::once(0)).collect();
+
+                    let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
+                    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+                    si.lpDesktop = desktop.as_mut_ptr();
+
+                    let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+
+                    let ok = unsafe {
+                        CreateProcessAsUserW(
+                            user_token,
+                            std::ptr::null(),
+                            cmd_w.as_mut_ptr(),
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
+                            0,
+                            0x08000000, // CREATE_NO_WINDOW
+                            std::ptr::null_mut(),
+                            std::ptr::null(),
+                            &mut si,
+                            &mut pi,
+                        )
+                    };
+
+                    if ok != 0 {
+                        unsafe {
+                            CloseHandle(pi.hProcess);
+                            CloseHandle(pi.hThread);
+                        }
+                        unsafe { CloseHandle(user_token) };
+                        return;
+                    }
+                    unsafe { CloseHandle(user_token) };
+                }
+            }
+
+            // Case B: Running in user interactive session (or fallback)
+            let res = Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-ExecutionPolicy", "Bypass",
+                    "-WindowStyle", "Hidden",
+                    "-EncodedCommand", &b64,
+                ])
+                .spawn();
+
+            if res.is_err() {
+                // Secondary fallback: clean tray balloon toast
+                show_windows_toast(&t, &d);
             }
         });
     }
