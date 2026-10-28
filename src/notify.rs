@@ -337,11 +337,51 @@ mod platform {
         }
     }
 
-    /// Delivers an interactive native Windows message box directly onto the
-    /// active console desktop (Session 1+) from Session 0.
+    /// Delivers an interactive modern ParkEase alert popup onto the
+    /// active desktop, falling back to WTSSendMessageW if script not present.
     pub fn show_session_popup(title: &str, message: &str, is_critical: bool) {
+        // 1. Try modern ParkEase WPF card popup
+        let (desc, advice) = if let Some((m, a)) = message.split_once("\n\nЗөвлөмж: ") {
+            (m, a)
+        } else {
+            (message, "")
+        };
+        let severity_str = if is_critical { "Critical" } else { "Warning" };
+
+        let ps_script = crate::config::Config::data_dir().join("show_alert.ps1");
+        let fallback_script = std::path::PathBuf::from(r"C:\ProgramData\Zev Detector\show_alert.ps1");
+        let target_script = if ps_script.exists() {
+            Some(ps_script)
+        } else if fallback_script.exists() {
+            Some(fallback_script)
+        } else {
+            None
+        };
+
+        if let Some(script) = target_script {
+            let t = title.to_string();
+            let d = desc.to_string();
+            let a = advice.to_string();
+            std::thread::spawn(move || {
+                let _ = std::process::Command::new("powershell")
+                    .args([
+                        "-NoProfile",
+                        "-ExecutionPolicy", "Bypass",
+                        "-WindowStyle", "Hidden",
+                        "-File", &script.to_string_lossy(),
+                        "-Title", &t,
+                        "-Message", &d,
+                        "-Advice", &a,
+                        "-Severity", severity_str,
+                        "-TimeoutSecs", "25",
+                    ])
+                    .spawn();
+            });
+            return;
+        }
+
+        // 2. Fallback to native Win32 WTSSendMessageW
         let session_id = unsafe { WTSGetActiveConsoleSessionId() };
-        // 0xFFFFFFFF means no console session is currently attached
         if session_id == 0xFFFF_FFFF {
             return;
         }
@@ -357,8 +397,6 @@ mod platform {
 
         std::thread::spawn(move || {
             let mut response: u32 = 0;
-            // Timeout: 25 seconds so unattended machines don't hang dialogs forever.
-            // bWait = 0 (asynchronous) so caller never blocks.
             let res = unsafe {
                 WTSSendMessageW(
                     0, // WTS_CURRENT_SERVER_HANDLE
@@ -374,7 +412,6 @@ mod platform {
                 )
             };
             if res == 0 {
-                // If WTSSendMessage fails, log debug
                 log::debug!("WTSSendMessageW returned 0 (user might be locked or switching)");
             }
         });
