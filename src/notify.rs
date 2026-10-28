@@ -111,20 +111,20 @@ impl LocalNotifier {
                 self.raise(
                     AlertType::NetworkDown,
                     AlertSeverity::Critical,
-                    "🚨 СҮЛЖЭЭ ТАСАРЛАА".to_string(),
-                    format!("Түрээсийн сервертэй холбогдож чадахгүй байна (Гээгдэл: {loss:.0}%). Хаалга офлайн горимд ажиллаж байна."),
-                    "Сүлжээний кабель болон свич, модемийг шалгана уу.".to_string(),
+                    "🚨 Интернет тасарсан байна".to_string(),
+                    format!("Интернэт бүрэн тасарсан байна."),
+                    "Интернэт холболтыг шалгана уу.".to_string(),
                     now_instant,
                     now_utc,
                 );
                 self.clear(&AlertType::NetworkDegraded, now_utc);
-            } else if score < self.netqual_threshold {
+            } else if score < self.netqual_threshold || loss > 0.0 {
                 self.raise(
                     AlertType::NetworkDegraded,
                     AlertSeverity::Warning,
-                    "⚠️ Сүлжээний чанар муудлаа".to_string(),
-                    format!("Сүлжээний чанар {score}% (Латент {latency}ms, гээгдэл {loss:.0}%). Зогсоолын хаалга саатаж болзошгүй."),
-                    "Интернэт урсгал эсвэл кабелийг шалгана уу.".to_string(),
+                    "💡 Дотоод сүлжээ тасарсан байна.".to_string(),
+                    format!("Зогсоолын программ доголдож болзошгүй."),
+                    "Интернэт холболты шалгана уу.".to_string(),
                     now_instant,
                     now_utc,
                 );

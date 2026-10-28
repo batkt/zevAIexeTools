@@ -335,7 +335,7 @@ function renderActiveAlerts() {
   banner.classList.toggle("critical", isCritical);
 
   const top = currentActiveAlerts[0];
-  $("#alert-icon").textContent = isCritical ? "🚨" : "⚠️";
+  $("#alert-icon").textContent = isCritical ? "🚨" : "💡";
   $("#alert-title").textContent = currentActiveAlerts.length > 1
     ? `${top.title} (+${currentActiveAlerts.length - 1} анхааруулга)`
     : top.title;
