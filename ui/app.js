@@ -249,18 +249,7 @@ function renderServices() {
   });
 }
 
-function populateWizServices() {
-  const wizSelect = $("#wiz-service");
-  if (!wizSelect) return;
-  const curVal = wizSelect.value;
-  wizSelect.innerHTML =
-    `<option value="">-- Компьютер дээрх үйлчилгээнүүдээс сонгох (${installedServices.length}) --</option>` +
-    installedServices.map((s) => {
-      const icon = s.isParkingRelated ? "⭐ " : "";
-      return `<option value="${escapeHtml(s.name)}" data-label="${escapeHtml(s.displayName)}">${icon}${escapeHtml(s.displayName)} (${escapeHtml(s.name)}) [${escapeHtml(s.status)}]</option>`;
-    }).join("");
-  if (curVal) wizSelect.value = curVal;
-}
+
 
 const renderLogs = () =>
   renderList($("#logs-list"), "tpl-log", cfg.logs.files, renderLogs);
@@ -612,80 +601,7 @@ function applyTheme(theme) {
   localStorage.setItem("theme", theme);
 }
 
-// ─── setup wizard ────────────────────────────────────────────────────────
-const WIZ_LAST = 3;
-let wizStep = 0;
-
-function wizRender() {
-  $$(".wizard-pane").forEach((p) => p.classList.toggle("active", +p.dataset.pane === wizStep));
-  $$(".wizard-steps li").forEach((li) => {
-    const n = +li.dataset.step;
-    li.classList.toggle("current", n === wizStep);
-    li.classList.toggle("done", n < wizStep);
-  });
-  $("#wiz-back").disabled = wizStep === 0;
-  $("#wiz-next").textContent = wizStep === WIZ_LAST ? "Хадгалаад суулгах" : "Үргэлжлүүлэх";
-
-  if (wizStep === WIZ_LAST) {
-    const rows = [
-      ["Холболт", cfg.server.url || "https://admin.zevtabs.mn/api"],
-      ["Агент", cfg.agent.name || info.hostname],
-      ["Хянах", [
-        cfg.eventlog.enabled && "Event Log",
-        cfg.logs.enabled && "лог файл",
-        cfg.health.enabled && "эрүүл мэнд",
-      ].filter(Boolean).join(", ") || "—"],
-    ];
-    $("#wiz-summary").innerHTML = "";
-    for (const [k, v] of rows) {
-      const row = document.createElement("div");
-      const key = document.createElement("span");
-      key.textContent = k;
-      const val = document.createElement("b");
-      val.textContent = v;
-      row.append(key, val);
-      $("#wiz-summary").appendChild(row);
-    }
-  }
-}
-
-/** Blocks moving past a step whose required field is empty. */
-function wizValidate() {
-  if (wizStep === 1 && !cfg.server.url.trim()) {
-    cfg.server.url = "https://admin.zevtabs.mn/api";
-  }
-  return true;
-}
-
-async function wizFinish() {
-  const wizSelect = $("#wiz-service");
-  const name = wizSelect ? wizSelect.value.trim() : "";
-  if (name && !cfg.services.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
-    const label = wizSelect.selectedOptions[0]?.dataset.label || name;
-    cfg.services.push({
-      name,
-      label,
-      must_run: true,
-      auto_restart: true,
-      max_restarts_per_hour: 3,
-      restart_grace_secs: 45,
-    });
-  }
-  busy(true, "Тохиргоог хадгалж байна…");
-  const ok = await save();
-  busy(false);
-  if (!ok) return;
-
-  await serviceAction("install");
-  const status = await invoke("service_status");
-  if (status.installed) await serviceAction("start");
-
-  closeWizard();
-}
-
-function closeWizard() {
-  $("#wizard").hidden = true;
-  $("#app").hidden = false;
+function renderAll() {
   renderBindings();
   renderServices();
   renderLogs();
@@ -708,20 +624,9 @@ async function boot() {
 
   await loadInstalledServices();
 
-  // A machine with no config.toml has never been set up — walk the operator
-  // through it instead of dropping them into a settings screen.
-  const firstRun = !info.configExists;
-  if (firstRun && !cfg.server.url) cfg.server.url = "https://admin.zevtabs.mn/api";
+  if (!cfg.server.url) cfg.server.url = "https://admin.zevtabs.mn/api";
 
-  renderBindings();
-  populateWizServices();
-
-  if (firstRun) {
-    $("#wizard").hidden = false;
-    wizRender();
-  } else {
-    closeWizard();
-  }
+  renderAll();
 
   await refreshDahuaStatus();
   statusTimer = setInterval(refreshStatus, 6000);
@@ -768,7 +673,6 @@ $("#refresh-installed-services")?.addEventListener("click", async () => {
   await loadInstalledServices();
   busy(false);
   renderServices();
-  populateWizServices();
   toast(`${installedServices.length} үйлчилгээ олдлоо.`, "ok");
 });
 
@@ -819,20 +723,7 @@ $("#theme-toggle").addEventListener("click", () =>
   applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark")
 );
 
-$("#wiz-next").addEventListener("click", () => {
-  if (!wizValidate()) return;
-  if (wizStep === WIZ_LAST) return wizFinish();
-  wizStep++;
-  wizRender();
-});
-$("#wiz-back").addEventListener("click", () => {
-  if (wizStep > 0) wizStep--;
-  wizRender();
-});
-// Skip writes nothing: saving here would either fail silently or leave a
-// half-filled config.toml behind, which would then stop the wizard from
-// reappearing on the next launch. Settings and Save are right there instead.
-$("#wiz-skip").addEventListener("click", closeWizard);
+
 
 $("#alert-details-btn")?.addEventListener("click", showAlertModal);
 $("#local-alert-banner")?.addEventListener("click", (e) => {
