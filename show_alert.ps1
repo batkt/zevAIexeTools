@@ -12,7 +12,7 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 $isCrit = ($Severity -eq "Critical")
 $borderColor = if ($isCrit) { "#EF4444" } else { "#F5A623" }
 $sevBadgeBg = if ($isCrit) { "#EF4444" } else { "#F59E0B" }
-$sevText = if ($isCrit) { "КРИТИКАЛ АЛДАА" } else { "АНХААРУУЛГА" }
+$sevText = if ($isCrit) { "Анхаарах шаардлагатай" } else { "АНХААРУУЛГА" }
 
 $hasLogo = (Test-Path $LogoPath)
 $logoElem = if ($hasLogo) {
@@ -95,7 +95,7 @@ $xaml = @"
             <!-- Footer Action -->
             <Grid Grid.Row="3">
                 <TextBlock Name="TxtTimer" Text="$TimeoutSecs с дараа хаагдана" Foreground="#71717A" FontSize="11" VerticalAlignment="Center" FontFamily="Segoe UI"/>
-                <Button Name="BtnAck" Content="Ойлголоо / Хаах" HorizontalAlignment="Right" Width="145" Height="34" Background="#F5A623" Foreground="#000000" FontWeight="Bold" FontSize="12" BorderThickness="0" Cursor="Hand">
+                <Button Name="BtnAck" Content="Хаах" HorizontalAlignment="Right" Width="145" Height="34" Background="#F5A623" Foreground="#000000" FontWeight="Bold" FontSize="12" BorderThickness="0" Cursor="Hand">
                     <Button.Resources>
                         <Style TargetType="Border">
                             <Setter Property="CornerRadius" Value="10"/>
