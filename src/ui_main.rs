@@ -294,19 +294,55 @@ async fn apply_update() -> Result<String, String> {
 /// Brings the main window back from the tray.
 fn show_main_window(app: &tauri::AppHandle) {
     use tauri::Manager;
+    let log_path = Config::data_dir().join("ui_window.log");
     if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
+        let s = w.show();
+        let u = w.unminimize();
+        let f = w.set_focus();
+        let v = w.is_visible();
+        let _ = std::fs::write(&log_path, format!("FOUND main window: show={:?} unmin={:?} focus={:?} is_visible={:?}", s, u, f, v));
+    } else {
+        let _ = std::fs::write(&log_path, "NOT FOUND main window");
     }
 }
 
+#[cfg(windows)]
+fn bring_existing_to_front() -> bool {
+    use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE};
+
+    let mutex_name: Vec<u16> = "Global\\ZevDetectorUIMutex\0".encode_utf16().collect();
+    unsafe {
+        let _ = CreateMutexW(std::ptr::null(), 0, mutex_name.as_ptr());
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            let title: Vec<u16> = "Zev Detector\0".encode_utf16().collect();
+            let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+            if hwnd != 0 {
+                ShowWindow(hwnd, SW_RESTORE);
+                SetForegroundWindow(hwnd);
+            }
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(not(windows))]
+fn bring_existing_to_front() -> bool {
+    false
+}
+
 fn main() {
+    if bring_existing_to_front() {
+        return;
+    }
+
     use tauri::menu::{Menu, MenuItem};
     use tauri::tray::{TrayIconBuilder, TrayIconEvent};
     use tauri::WindowEvent;
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             agent_info,
             load_config,
@@ -331,12 +367,10 @@ fn main() {
             let mut tray = TrayIconBuilder::new()
                 .menu(&menu)
                 .tooltip("Zev Detector")
-                // Left click belongs to "open the window"; the menu is on right
-                // click, which is what a Windows tray icon is expected to do.
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => show_main_window(app),
-                    "quit" => app.exit(0),
+                    "quit" => std::process::exit(0),
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -363,15 +397,17 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the window hides it instead of quitting. The detector
-            // itself is the Windows service and is unaffected either way, but
-            // people expect the tray icon to stay put — and reopening from the
-            // tray is instant, where relaunching the exe is not.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let _ = window.hide();
                 api.prevent_close();
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Zev Detector");
+        .build(tauri::generate_context!())
+        .expect("error while building Zev Detector");
+
+    app.run(|_app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { api, .. } = event {
+            api.prevent_exit();
+        }
+    });
 }
