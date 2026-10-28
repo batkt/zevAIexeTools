@@ -432,6 +432,18 @@ async function refreshDahuaStatus() {
 function renderDahuaUI(s) {
   if (!s) return;
 
+  const isHik = s.provider === "hikvision" || (s.displayName && s.displayName.toLowerCase().includes("hik")) || (s.serviceName && s.serviceName.toLowerCase().includes("hik"));
+
+  // 0. Dynamic titles
+  const navTitle = $("#nav-dahua-title");
+  if (navTitle) navTitle.textContent = isHik ? "Hikvision Parking" : "Dahua Parking";
+
+  const ovMainTitle = $("#ov-dahua-main-title");
+  if (ovMainTitle) ovMainTitle.textContent = isHik ? "Hikvision Parking Service (hikRustExe)" : "Dahua Parking Service (dahuarust)";
+
+  const ovSub = $("#ov-dahua-sub");
+  if (ovSub) ovSub.textContent = isHik ? "Hikvision ALPR камер, хаалт болон орон нутгийн API үйлчилгээ" : "Dahua ALPR камер, хаалт болон API үйлчилгээ";
+
   // 1. Sidebar pill
   const sidePill = $("#dahua-sidebar-pill");
   if (sidePill) {
@@ -460,9 +472,12 @@ function renderDahuaUI(s) {
     }
   }
 
-  // 3. Dahua dedicated page
+  // 3. Dahua/Hikvision dedicated page
   const titleEl = $("#dh-svc-title");
   if (titleEl) titleEl.textContent = `${s.serviceName} (${s.displayName})`;
+
+  const dhSub = $("#dh-svc-sub");
+  if (dhSub) dhSub.textContent = isHik ? "Hikvision ALPR камер, хаалт ба API серверийн шууд хяналт" : "Dahua ALPR камер, хаалт ба API серверийн шууд хяналт";
 
   const statePill = $("#dh-state-pill");
   if (statePill) {
@@ -479,10 +494,18 @@ function renderDahuaUI(s) {
     p5000El.style.color = s.apiPort5000Open ? "#10b981" : "#ef4444";
   }
 
+  const p2Label = $("#dh-port2-label");
+  if (p2Label) p2Label.textContent = isHik ? "Камер Порт 80" : "NetSDK Порт 37777";
+
   const p37777El = $("#dh-stat-port37777");
   if (p37777El) {
-    p37777El.textContent = s.netsdkPort37777Open ? "Нээлттэй (Active)" : "Хаалттай (Closed)";
-    p37777El.style.color = s.netsdkPort37777Open ? "#10b981" : "var(--text-2)";
+    if (isHik) {
+      p37777El.textContent = s.cameraPort80Open ? "Нээлттэй (Online)" : (s.isActive ? "Холбогдсон" : "Хаалттай (Closed)");
+      p37777El.style.color = (s.cameraPort80Open || s.isActive) ? "#10b981" : "var(--text-2)";
+    } else {
+      p37777El.textContent = s.netsdkPort37777Open ? "Нээлттэй (Active)" : "Хаалттай (Closed)";
+      p37777El.style.color = s.netsdkPort37777Open ? "#10b981" : "var(--text-2)";
+    }
   }
 
   const updatedEl = $("#dh-stat-updated");

@@ -53,12 +53,16 @@ pub struct ParkingImageRecord {
 pub struct DahuaStatusSnapshot {
     pub service_name: String,
     pub display_name: String,
+    #[serde(default)]
+    pub provider: String, // "hikvision" or "dahua"
     pub is_active: bool,
     pub state: String,
     pub pid: u32,
     pub exit_code: u32,
     pub api_port_5000_open: bool,
     pub netsdk_port_37777_open: bool,
+    #[serde(default)]
+    pub camera_port_80_open: bool,
     pub log_path: String,
     pub log_exists: bool,
     pub total_records: usize,
@@ -111,8 +115,10 @@ pub fn parse_log_line(line: &str, id: usize) -> DahuaLogRecord {
     }
 }
 
-/// Resolves the file path of Dahua's service.log.
+/// Resolves the file path of Dahua/Hikvision service.log by picking the most recently modified candidate.
 pub fn find_dahua_log_path() -> PathBuf {
+    let mut candidates = Vec::new();
+
     // 1. Check config.toml logs entries
     let cfg = Config::load_or_default();
     for entry in &cfg.logs.files {
@@ -124,53 +130,58 @@ pub fn find_dahua_log_path() -> PathBuf {
             || entry.path.to_lowercase().contains("hikvision"))
             && p.exists()
         {
-            return p.to_path_buf();
+            candidates.push(p.to_path_buf());
         }
     }
 
-    // 2. Check SCM service exe path (Dahua or Hikvision)
-    for svc in &[DAHUA_SERVICE_NAME, HIK_SERVICE_NAME, ALT_SERVICE_NAME] {
+    // 2. Check SCM service exe parent dirs (Dahua or Hikvision)
+    for svc in &[
+        "zevHikvision", "hikvision-service", "zevhikvision",
+        "zevdahua", "DahuaParkingService", "ParkingService"
+    ] {
         if let Ok(exe) = services::exe_path(svc) {
             if let Some(parent) = exe.parent() {
-                for log_name in &["service.log", "hikvision-service.log"] {
+                for log_name in &["hikvision-service.log", "service.log"] {
                     let candidate = parent.join(log_name);
                     if candidate.exists() {
-                        return candidate;
+                        candidates.push(candidate);
                     }
                 }
             }
         }
     }
 
-    // 3. Known hardcoded path in workspace
-    let primary = PathBuf::from(r"D:\zevtabs\dahuarust\dahuaExeRust\target\release\service.log");
-    if primary.exists() {
-        return primary;
-    }
-    let hik_primary = PathBuf::from(r"D:\zevtabs\hikRustExe\target\release\hikvision-service.log");
-    if hik_primary.exists() {
-        return hik_primary;
-    }
-
-    // 4. Secondary fallback candidates
-    let fallbacks = [
+    // 3. Known hardcoded paths in workspace and Program Files / ProgramData
+    let hardcoded = [
+        r"D:\zevtabs\hikRustExe\target\release\hikvision-service.log",
+        r"D:\zevtabs\dahuarust\dahuaExeRust\target\release\service.log",
         r"C:\Program Files\zevHikvision\hikvision-service.log",
         r"C:\Program Files\zevDahuaRust\service.log",
         r"C:\Program Files\DahuaParkingService\service.log",
         r"D:\zolbayar\dahua-service\target\release\service.log",
-        r"C:\ProgramData\Zev Detector\service.log",
         r"C:\ProgramData\Zev Detector\hikvision-service.log",
+        r"C:\ProgramData\Zev Detector\service.log",
     ];
 
-    for fb in fallbacks {
+    for fb in hardcoded {
         let p = PathBuf::from(fb);
         if p.exists() {
-            return p;
+            candidates.push(p);
         }
     }
 
-    // Default to the primary path even if it doesn't exist yet
-    primary
+    // Sort by modification timestamp descending (newest file wins)
+    if !candidates.is_empty() {
+        candidates.sort_by(|a, b| {
+            let time_a = fs::metadata(a).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let time_b = fs::metadata(b).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            time_b.cmp(&time_a)
+        });
+        return candidates[0].clone();
+    }
+
+    // Default fallback
+    PathBuf::from(r"D:\zevtabs\hikRustExe\target\release\hikvision-service.log")
 }
 
 /// Collects recent log records, maintaining strictly a 10-item FIFO ring buffer.
@@ -403,37 +414,94 @@ pub fn collect_recent_images() -> (Vec<ParkingImageRecord>, Option<String>, Opti
 pub const ALT_SERVICE_NAME: &str = "ParkingService";
 pub const ALT_DISPLAY_NAME: &str = "zevzogsoolrust";
 
-/// Inspects DahuaParkingService / ParkingService status, checks ports 5000 and 37777,
+/// Searches running processes on the system to detect interactive or console-mode parking services.
+pub fn find_running_parking_process() -> Option<(u32, String, String, String)> {
+    use sysinfo::{ProcessesToUpdate, System};
+    let mut sys = System::new();
+    sys.refresh_processes(ProcessesToUpdate::All, true);
+
+    let candidates: &[(&str, &str, &str)] = &[
+        ("hikvision-service", "Hikvision Parking Service", "hikvision"),
+        ("zevhikvision", "Hikvision Parking Service", "hikvision"),
+        ("dahua-service", "Dahua Parking Service", "dahua"),
+        ("dahuarust", "Dahua Parking Service", "dahua"),
+        ("zevdahua", "Dahua Parking Service", "dahua"),
+        ("ParkingService", "Parking Service", "parking"),
+    ];
+
+    for (pid, proc) in sys.processes() {
+        let raw_name = proc.name().to_string_lossy().to_string();
+        let lower = raw_name.to_lowercase();
+        for (target, disp, prov) in candidates {
+            let t_lower = target.to_lowercase();
+            if lower == t_lower || lower == format!("{t_lower}.exe") || lower.starts_with(&t_lower) {
+                return Some((pid.as_u32(), raw_name, disp.to_string(), prov.to_string()));
+            }
+        }
+    }
+    None
+}
+
+/// Inspects Dahua / Hikvision parking service status, checks ports,
 /// extracts recent logs directly from live exe API or fallback log file, and saves the snapshot to disk.
 pub fn get_dahua_status() -> DahuaStatusSnapshot {
     let mut active_svc_name = DAHUA_SERVICE_NAME.to_string();
     let mut active_disp_name = DAHUA_DISPLAY_NAME.to_string();
+    let mut provider = "dahua".to_string();
 
-    // 1. Try DahuaParkingService first
-    let mut observed = services::query(DAHUA_SERVICE_NAME).unwrap_or(services::Observed {
+    let mut observed = services::Observed {
         state: "NotInstalled".to_string(),
         pid: 0,
         exit_code: 0,
-    });
+    };
 
-    // 2. If not running, check zevHikvision
+    let scm_candidates: &[(&str, &str, &str)] = &[
+        ("zevHikvision", "Hikvision Parking Service", "hikvision"),
+        ("hikvision-service", "Hikvision Parking Service", "hikvision"),
+        ("zevhikvision", "Hikvision Parking Service", "hikvision"),
+        ("zevdahua", "Dahua Parking Service", "dahua"),
+        ("DahuaParkingService", "Dahua Parking Service", "dahua"),
+        ("ParkingService", "Parking Service", "parking"),
+    ];
+
+    // 1. Check running processes first (catches interactive / console mode)
+    if let Some((pid, proc_name, disp, prov)) = find_running_parking_process() {
+        active_svc_name = proc_name;
+        active_disp_name = disp;
+        provider = prov;
+        observed = services::Observed {
+            state: "Running (Interactive)".to_string(),
+            pid,
+            exit_code: 0,
+        };
+    }
+
+    // 2. If no running process was found, check SCM services for running ones
     if !observed.is_running() {
-        if let Ok(hik_obs) = services::query(HIK_SERVICE_NAME) {
-            if hik_obs.is_running() {
-                active_svc_name = HIK_SERVICE_NAME.to_string();
-                active_disp_name = HIK_DISPLAY_NAME.to_string();
-                observed = hik_obs;
+        for (svc_name, disp_name, prov) in scm_candidates {
+            if let Ok(obs) = services::query(svc_name) {
+                if obs.is_running() {
+                    active_svc_name = svc_name.to_string();
+                    active_disp_name = disp_name.to_string();
+                    provider = prov.to_string();
+                    observed = obs;
+                    break;
+                }
             }
         }
     }
 
-    // 3. If still not running, check ParkingService
-    if !observed.is_running() {
-        if let Ok(alt_obs) = services::query(ALT_SERVICE_NAME) {
-            if alt_obs.is_running() {
-                active_svc_name = ALT_SERVICE_NAME.to_string();
-                active_disp_name = ALT_DISPLAY_NAME.to_string();
-                observed = alt_obs;
+    // 3. If still not running, check if any SCM service is at least installed (even if stopped)
+    if observed.state == "NotInstalled" {
+        for (svc_name, disp_name, prov) in scm_candidates {
+            if let Ok(obs) = services::query(svc_name) {
+                if obs.state != "NotInstalled" {
+                    active_svc_name = svc_name.to_string();
+                    active_disp_name = disp_name.to_string();
+                    provider = prov.to_string();
+                    observed = obs;
+                    break;
+                }
             }
         }
     }
@@ -441,6 +509,8 @@ pub fn get_dahua_status() -> DahuaStatusSnapshot {
     let local_timeout = std::time::Duration::from_millis(150);
     let api_port_5000_open = ports::is_open_timeout("127.0.0.1", DAHUA_API_PORT, local_timeout);
     let netsdk_port_37777_open = ports::is_open_timeout("127.0.0.1", DAHUA_NETSDK_PORT, local_timeout);
+    let camera_port_80_open = ports::is_open_timeout("192.168.1.64", 80, local_timeout)
+        || ports::is_open_timeout("127.0.0.1", 80, local_timeout);
 
     // Pull directly from live exe API if Port 5000 is open
     let (recent_logs, total_records, log_path_display, log_exists, live_api_active) =
@@ -455,17 +525,38 @@ pub fn get_dahua_status() -> DahuaStatusSnapshot {
                     .into_iter()
                     .rev()
                     .collect();
+
+                // If live logs mention Hikvision, confirm provider
+                if ring.iter().any(|r| r.message.to_lowercase().contains("hikvision") || r.raw.to_lowercase().contains("hikvision")) {
+                    provider = "hikvision".to_string();
+                    if !active_disp_name.contains("Hikvision") {
+                        active_disp_name = "Hikvision Parking Service".to_string();
+                    }
+                }
+
                 (ring, total, format!("http://127.0.0.1:{DAHUA_API_PORT}/api/recentLogs (Live Exe API)"), true, true)
             } else {
                 let log_path_buf = find_dahua_log_path();
                 let exists = log_path_buf.exists();
                 let (logs, total) = collect_recent_logs(&log_path_buf);
+                if log_path_buf.to_string_lossy().to_lowercase().contains("hikvision") {
+                    provider = "hikvision".to_string();
+                    if !active_disp_name.contains("Hikvision") {
+                        active_disp_name = "Hikvision Parking Service".to_string();
+                    }
+                }
                 (logs, total, log_path_buf.display().to_string(), exists, false)
             }
         } else {
             let log_path_buf = find_dahua_log_path();
             let exists = log_path_buf.exists();
             let (logs, total) = collect_recent_logs(&log_path_buf);
+            if log_path_buf.to_string_lossy().to_lowercase().contains("hikvision") {
+                provider = "hikvision".to_string();
+                if !active_disp_name.contains("Hikvision") {
+                    active_disp_name = "Hikvision Parking Service".to_string();
+                }
+            }
             (logs, total, log_path_buf.display().to_string(), exists, false)
         };
 
@@ -492,12 +583,14 @@ pub fn get_dahua_status() -> DahuaStatusSnapshot {
     let snapshot = DahuaStatusSnapshot {
         service_name: active_svc_name,
         display_name: active_disp_name,
+        provider,
         is_active,
         state: effective_state,
         pid: observed.pid,
         exit_code: observed.exit_code,
         api_port_5000_open,
         netsdk_port_37777_open,
+        camera_port_80_open,
         log_path: log_path_display,
         log_exists,
         total_records,
@@ -530,8 +623,8 @@ fn save_snapshot_to_disk(snapshot: &DahuaStatusSnapshot) {
     let text_file = data_dir.join("dahua_recent_10.log");
     let mut text_content = String::new();
     text_content.push_str(&format!(
-        "# Dahua Parking Service Recent 10 Records (Updated: {})\n# Status: {} | PID: {}\n\n",
-        snapshot.updated_at, snapshot.state, snapshot.pid
+        "# Parking Service Recent 10 Records ({}) (Updated: {})\n# Status: {} | PID: {}\n\n",
+        snapshot.display_name, snapshot.updated_at, snapshot.state, snapshot.pid
     ));
     for rec in &snapshot.recent_logs {
         text_content.push_str(&format!(
@@ -542,19 +635,31 @@ fn save_snapshot_to_disk(snapshot: &DahuaStatusSnapshot) {
     let _ = fs::write(text_file, text_content);
 }
 
-/// Commands to start/stop the Dahua service directly via SCM.
+fn resolve_active_service_name() -> &'static str {
+    for s in &["zevHikvision", "hikvision-service", "zevhikvision", "zevdahua", DAHUA_SERVICE_NAME, ALT_SERVICE_NAME] {
+        if let Ok(obs) = services::query(s) {
+            if obs.state != "NotInstalled" {
+                return s;
+            }
+        }
+    }
+    DAHUA_SERVICE_NAME
+}
+
+/// Commands to start/stop the Dahua/Hikvision service directly via SCM.
 pub fn start_dahua_service() -> anyhow::Result<()> {
-    services::start(DAHUA_SERVICE_NAME)
+    services::start(resolve_active_service_name())
 }
 
 pub fn stop_dahua_service() -> anyhow::Result<()> {
-    services::stop(DAHUA_SERVICE_NAME)
+    services::stop(resolve_active_service_name())
 }
 
 pub fn restart_dahua_service() -> anyhow::Result<()> {
-    let _ = services::stop(DAHUA_SERVICE_NAME);
+    let name = resolve_active_service_name();
+    let _ = services::stop(name);
     std::thread::sleep(std::time::Duration::from_millis(1500));
-    services::start(DAHUA_SERVICE_NAME)
+    services::start(name)
 }
 
 #[cfg(test)]
