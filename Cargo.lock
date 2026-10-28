@@ -5683,9 +5683,10 @@ dependencies = [
 
 [[package]]
 name = "zev-detector"
-version = "1.3.0"
+version = "1.5.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "fern",
  "log",

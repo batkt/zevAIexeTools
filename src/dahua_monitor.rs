@@ -34,6 +34,20 @@ pub struct DahuaLogRecord {
     pub raw: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ParkingImageRecord {
+    pub filename: String,
+    pub plate: String,
+    pub timestamp: String,
+    pub camera_ip: String,
+    pub provider: String,
+    pub size_bytes: usize,
+    pub relative_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base64: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DahuaStatusSnapshot {
@@ -49,6 +63,14 @@ pub struct DahuaStatusSnapshot {
     pub log_exists: bool,
     pub total_records: usize,
     pub recent_logs: Vec<DahuaLogRecord>, // strictly <= 10 records
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_images: Vec<ParkingImageRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_image_base64: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_image_plate: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_image_time: Option<String>,
     pub updated_at: String,
 }
 
@@ -215,6 +237,169 @@ pub fn fetch_live_api_logs(port: u16) -> Option<Vec<DahuaLogRecord>> {
     None
 }
 
+/// Queries the live recent captures from parking service via localhost HTTP API.
+pub fn fetch_live_api_captures(port: u16) -> Option<Vec<ParkingImageRecord>> {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    let mut stream = TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        Duration::from_millis(250),
+    ).ok()?;
+    stream.set_read_timeout(Some(Duration::from_millis(500))).ok()?;
+    stream.set_write_timeout(Some(Duration::from_millis(250))).ok()?;
+
+    let req = format!(
+        "GET /api/recentCaptures HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nAccept: application/json\r\n\r\n"
+    );
+    stream.write_all(req.as_bytes()).ok()?;
+
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).ok()?;
+
+    let resp_str = String::from_utf8_lossy(&response);
+    if let Some(body_start) = resp_str.find("\r\n\r\n") {
+        let body = &resp_str[body_start + 4..];
+        if let Ok(records) = serde_json::from_str::<Vec<ParkingImageRecord>>(body) {
+            return Some(records);
+        }
+    }
+    None
+}
+
+/// Returns known directories where Dahua/Hikvision cameras store captured car images.
+pub fn find_image_root_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let candidates = [
+        r"D:\zevtabs\parking_images",
+        r"C:\ProgramData\parking_images",
+        r"D:\zevtabs\dahuarust\dahuaExeRust\parking_images",
+        r"D:\zevtabs\hikRustExe\parking_images",
+        r"parking_images",
+    ];
+    for c in candidates {
+        let p = PathBuf::from(c);
+        if p.exists() && p.is_dir() {
+            dirs.push(p);
+        }
+    }
+    dirs
+}
+
+fn is_image_file(p: &Path) -> bool {
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    ext == "jpg" || ext == "jpeg" || ext == "png"
+}
+
+/// Scans parking image files on disk or via API, and returns (recent_images, latest_base64, latest_plate, latest_time).
+pub fn collect_recent_images() -> (Vec<ParkingImageRecord>, Option<String>, Option<String>, Option<String>) {
+    // 1. Check if live port 5000 API provides recent captures
+    let mut images = fetch_live_api_captures(DAHUA_API_PORT).unwrap_or_default();
+
+    // 2. If API was empty, scan disk
+    if images.is_empty() {
+        let roots = find_image_root_dirs();
+        let mut found_files: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+
+        for root in roots {
+            if let Ok(entries) = fs::read_dir(&root) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        if let Ok(sub_entries) = fs::read_dir(&path) {
+                            for sub in sub_entries.flatten() {
+                                let sub_path = sub.path();
+                                if is_image_file(&sub_path) {
+                                    if let Ok(meta) = sub.metadata() {
+                                        let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                                        found_files.push((sub_path, mtime));
+                                    }
+                                }
+                            }
+                        }
+                    } else if is_image_file(&path) {
+                        if let Ok(meta) = entry.metadata() {
+                            let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                            found_files.push((path, mtime));
+                        }
+                    }
+                }
+            }
+        }
+
+        found_files.sort_by(|a, b| b.1.cmp(&a.1));
+        found_files.truncate(10);
+
+        for (file_path, mtime) in found_files {
+            let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+            let size_bytes = fs::metadata(&file_path).map(|m| m.len() as usize).unwrap_or(0);
+            let time_str = chrono::DateTime::<Local>::from(mtime).format("%Y-%m-%d %H:%M:%S").to_string();
+            
+            // Format: <plate>_<timestamp>_<provider>.jpg
+            let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            let parts: Vec<&str> = stem.split('_').collect();
+            let plate = parts.get(0).copied().unwrap_or("Машин").to_string();
+            let provider = parts.get(2).copied().unwrap_or("camera").to_string();
+            let rel_path = file_path.to_string_lossy().to_string();
+
+            images.push(ParkingImageRecord {
+                filename,
+                plate,
+                timestamp: time_str,
+                camera_ip: "127.0.0.1".to_string(),
+                provider,
+                size_bytes,
+                relative_path: rel_path,
+                base64: None,
+            });
+        }
+    }
+
+    // 3. For the latest image, read and create base64 thumbnail
+    let mut latest_base64 = None;
+    let mut latest_plate = None;
+    let mut latest_time = None;
+
+    if let Some(first) = images.first() {
+        latest_plate = Some(first.plate.clone());
+        latest_time = Some(first.timestamp.clone());
+
+        let cand_path = PathBuf::from(&first.relative_path);
+        let path_to_read = if cand_path.exists() {
+            Some(cand_path)
+        } else {
+            let mut resolved = None;
+            for root in find_image_root_dirs() {
+                let candidate = root.join(&first.filename);
+                if candidate.exists() {
+                    resolved = Some(candidate);
+                    break;
+                }
+                let with_rel = root.join(&first.relative_path);
+                if with_rel.exists() {
+                    resolved = Some(with_rel);
+                    break;
+                }
+            }
+            resolved
+        };
+
+        if let Some(p) = path_to_read {
+            if let Ok(bytes) = fs::read(&p) {
+                // If it's valid JPEG SOI (0xFF, 0xD8) and size <= 350KB
+                if bytes.len() >= 4 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes.len() <= 350_000 {
+                    use base64::prelude::*;
+                    let encoded = BASE64_STANDARD.encode(&bytes);
+                    latest_base64 = Some(format!("data:image/jpeg;base64,{encoded}"));
+                }
+            }
+        }
+    }
+
+    (images, latest_base64, latest_plate, latest_time)
+}
+
 pub const ALT_SERVICE_NAME: &str = "ParkingService";
 pub const ALT_DISPLAY_NAME: &str = "zevzogsoolrust";
 
@@ -302,6 +487,8 @@ pub fn get_dahua_status() -> DahuaStatusSnapshot {
         observed.state
     };
 
+    let (recent_images, latest_image_base64, latest_image_plate, latest_image_time) = collect_recent_images();
+
     let snapshot = DahuaStatusSnapshot {
         service_name: active_svc_name,
         display_name: active_disp_name,
@@ -315,6 +502,10 @@ pub fn get_dahua_status() -> DahuaStatusSnapshot {
         log_exists,
         total_records,
         recent_logs,
+        recent_images,
+        latest_image_base64,
+        latest_image_plate,
+        latest_image_time,
         updated_at: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     };
 
