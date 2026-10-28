@@ -65,13 +65,13 @@ pub async fn run_app(mut cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<(
     let mut due_beat = Instant::now() + Duration::from_secs(10);
     // Pinging costs a second or two, so it starts after the first heartbeat
     // rather than competing with startup.
-    let mut due_net = Instant::now() + Duration::from_secs(30);
+    let mut due_net = Instant::now();
     let mut due_clock = Instant::now() + Duration::from_secs(45);
     // Checking GitHub on every service start would hammer the API across a
     // fleet restarting together.
     let mut due_update = Instant::now() + Duration::from_secs(120);
     let mut due_cleanup = Instant::now() + Duration::from_secs(90);
-    let mut due_notify = Instant::now() + Duration::from_secs(15);
+    let mut due_notify = Instant::now() + Duration::from_secs(2);
     let mut last_cleanup_day: Option<String> = None;
 
     let evt_int = Duration::from_secs(cfg.eventlog.poll_interval_secs.max(5));

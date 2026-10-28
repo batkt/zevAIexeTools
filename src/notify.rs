@@ -104,7 +104,7 @@ impl LocalNotifier {
 
         // 1. Network checks
         if let Some(score) = net_score {
-            let latency = net_latency_ms.unwrap_or(0);
+            let _latency = net_latency_ms.unwrap_or(0);
             let loss = net_loss_pct.unwrap_or(0.0);
 
             if score == 0 || loss >= 99.0 {
@@ -155,9 +155,9 @@ impl LocalNotifier {
             self.raise(
                 AlertType::DiskNearFull,
                 AlertSeverity::Critical,
-                format!("⚠️ Диск {worst_disk_mount} дүүрч байна"),
-                format!("{worst_disk_pct:.0}% дүүрсэн, {worst_disk_free_gb:.1} GB үлдсэн. Лог болон өгөгдөл бичигдэхгүй болох эрсдэлтэй."),
-                "Хэрэгцээгүй файлуудыг устгаж диск чөлөөлнө үү.".to_string(),
+                format!("⚠️ Таны компьютерийн багтаамж {worst_disk_mount} дүүрч байна"),
+                format!("{worst_disk_pct:.0}% дүүрсэн, {worst_disk_free_gb:.1} GB үлдсэн."),
+                "Хэрэгцээгүй файлуудыг устгаж чөлөөлнө үү.".to_string(),
                 now_instant,
                 now_utc,
             );
