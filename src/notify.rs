@@ -91,7 +91,7 @@ impl LocalNotifier {
         net_loss_pct: Option<f32>,
         worst_disk_pct: f32,
         worst_disk_mount: &str,
-        worst_disk_free_gb: f32,
+        _worst_disk_free_gb: f32,
         closed_ports: &[(u16, String)],
         healer_limit_hit: Option<&str>,
     ) {
@@ -112,7 +112,6 @@ impl LocalNotifier {
                     AlertType::NetworkDown,
                     AlertSeverity::Critical,
                     "🚨 Интернет тасарсан байна".to_string(),
-                    format!("Интернэт бүрэн тасарсан байна."),
                     "Интернэт холболтыг шалгана уу.".to_string(),
                     now_instant,
                     now_utc,
@@ -123,8 +122,7 @@ impl LocalNotifier {
                     AlertType::NetworkDegraded,
                     AlertSeverity::Warning,
                     "💡 Дотоод сүлжээ тасарсан байна.".to_string(),
-                    format!("Зогсоолын программ доголдож болзошгүй."),
-                    "Интернэт холболты шалгана уу.".to_string(),
+                    "Интернэт холболтыг шалгана уу.".to_string(),
                     now_instant,
                     now_utc,
                 );
@@ -140,8 +138,7 @@ impl LocalNotifier {
             self.raise(
                 AlertType::CameraPortClosed,
                 AlertSeverity::Critical,
-                "🚨 КАМЕР / ҮЙЛЧИЛГЭЭ ТАСРАВ".to_string(),
-                format!("{label} (порт {port}) хаалттай эсвэл холболт тасарсан байна! Машин танихгүй байж болзошгүй."),
+                format!("🚨 КАМЕР / ҮЙЛЧИЛГЭЭ ТАСРАВ ({label}:{port})"),
                 "Камерын тэжээл болон сүлжээний холболтыг шалгана уу.".to_string(),
                 now_instant,
                 now_utc,
@@ -156,7 +153,6 @@ impl LocalNotifier {
                 AlertType::DiskNearFull,
                 AlertSeverity::Critical,
                 format!("⚠️ Таны компьютерийн багтаамж {worst_disk_mount} дүүрч байна"),
-                format!("{worst_disk_pct:.0}% дүүрсэн, {worst_disk_free_gb:.1} GB үлдсэн."),
                 "Хэрэгцээгүй файлуудыг устгаж чөлөөлнө үү.".to_string(),
                 now_instant,
                 now_utc,
@@ -171,7 +167,6 @@ impl LocalNotifier {
                 AlertType::HealLimitReached,
                 AlertSeverity::Critical,
                 format!("🚨 {svc_name} үйлчилгээ гацав"),
-                format!("{svc_name} 1 цагт хэт олон удаа унаж дахин ачааллаа. Үйлчилгээг гараар шалгах шаардлагатай."),
                 "Task Manager эсвэл log файлыг шалгаж үйлчилгээг асаана уу.".to_string(),
                 now_instant,
                 now_utc,
@@ -183,13 +178,11 @@ impl LocalNotifier {
         self.persist_snapshot(now_utc);
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn raise(
         &mut self,
         alert_type: AlertType,
         severity: AlertSeverity,
         title: String,
-        message: String,
         advice: String,
         now_instant: Instant,
         now_utc: DateTime<Utc>,
@@ -212,18 +205,17 @@ impl LocalNotifier {
             alert_type: alert_type.clone(),
             severity: severity.clone(),
             title: title.clone(),
-            message: message.clone(),
+            message: String::new(),
             advice: advice.clone(),
             first_seen,
             last_notified: now_utc.to_rfc3339(),
         };
 
         if should_notify {
-            warn!("[LOCAL ALERT] {}: {} — {}", title, message, advice);
-            self.dispatch_notifications(&severity, &title, &format!("{message}\n\nЗөвлөмж: {advice}"));
+            warn!("[LOCAL ALERT] {}: Зөвлөмж: {}", title, advice);
+            self.dispatch_notifications(&severity, &title, &format!("Зөвлөмж: {advice}"));
             self.active.insert(alert_type, (alert, now_instant));
         } else if let Some((existing, _)) = self.active.get_mut(&alert_type) {
-            existing.message = message;
             existing.advice = advice;
         }
     }
@@ -397,6 +389,8 @@ mod platform {
     pub fn show_session_popup(title: &str, message: &str, is_critical: bool) {
         let (desc, advice) = if let Some((m, a)) = message.split_once("\n\nЗөвлөмж: ") {
             (m, a)
+        } else if let Some(a) = message.strip_prefix("Зөвлөмж: ") {
+            ("", a)
         } else {
             (message, "")
         };

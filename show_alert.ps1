@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$Title = "Диск C:\ дүүрч байна",
     [string]$Message = "95% дүүрсэн, 18.7 GB үлдсэн. Лог болон өгөгдөл бичигдэхгүй болох эрсдэлтэй.",
     [string]$Advice = "Хэрэгцээгүй файлуудыг устгаж диск чөлөөлнө үү.",
@@ -28,6 +28,12 @@ $logoElem = if ($hasLogo) {
 $safeTitle = [System.Security.SecurityElement]::Escape($Title)
 $safeMsg = [System.Security.SecurityElement]::Escape($Message)
 $safeAdv = [System.Security.SecurityElement]::Escape($Advice)
+
+$msgElem = if (![string]::IsNullOrWhiteSpace($Message)) {
+    "<TextBlock Text='$safeMsg' Foreground='#D4D4D8' FontSize='12' TextWrapping='Wrap' LineHeight='18' Margin='0,6,0,0' FontFamily='Segoe UI Variable Text, Segoe UI'/>"
+} else {
+    ""
+}
 
 $xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -76,8 +82,8 @@ $xaml = @"
 
             <!-- Title & Message -->
             <StackPanel Grid.Row="1" Margin="0,16,0,12">
-                <TextBlock Text="$safeTitle" Foreground="White" FontWeight="Bold" FontSize="15" TextWrapping="Wrap" Margin="0,0,0,6" FontFamily="Segoe UI Variable Display, Segoe UI"/>
-                <TextBlock Text="$safeMsg" Foreground="#D4D4D8" FontSize="12" TextWrapping="Wrap" LineHeight="18" FontFamily="Segoe UI Variable Text, Segoe UI"/>
+                <TextBlock Text="$safeTitle" Foreground="White" FontWeight="Bold" FontSize="15" TextWrapping="Wrap" FontFamily="Segoe UI Variable Display, Segoe UI"/>
+                $msgElem
             </StackPanel>
 
             <!-- Advice Box -->
