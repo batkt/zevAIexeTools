@@ -80,13 +80,10 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#UiExe}"; Tasks: desktopicon
 
 [Run]
-; The service is registered by the app's setup wizard, not here. Registering it
-; at install time would mean an auto-start service with no config.toml yet,
-; which just fails and gets restarted by its own failure actions until someone
-; opens the app. Silent/mass deployments push a config.toml and then run
-; `zev-detector.exe install` themselves.
-Filename: "{app}\{#UiExe}"; Description: "Open {#AppName} to finish setup"; \
-  Flags: postinstall nowait skipifsilent
+; Auto-install and start the Windows service immediately with zero-config
+Filename: "{app}\{#AgentExe}"; Parameters: "install"; Flags: runhidden waituntilterminated
+Filename: "{app}\{#UiExe}"; Description: "Open {#AppName}"; \
+  Flags: postinstall nowait skipifsilent unchecked
 
 [UninstallRun]
 ; Stop before delete: a running service holds the exe open and would leave the

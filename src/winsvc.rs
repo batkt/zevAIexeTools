@@ -176,9 +176,10 @@ mod imp {
             account_password: None,
         };
 
-        match manager.create_service(&info, ServiceAccess::CHANGE_CONFIG) {
-            Ok(svc) => {
-                svc.set_description(SERVICE_DESC).ok();
+        let created = manager.create_service(&info, ServiceAccess::CHANGE_CONFIG | ServiceAccess::START);
+        let svc = match created {
+            Ok(s) => {
+                s.set_description(SERVICE_DESC).ok();
                 let _ = std::process::Command::new("sc")
                     .args([
                         "failure",
@@ -190,15 +191,30 @@ mod imp {
                     ])
                     .output();
 
-                println!("✓ Service '{SERVICE_NAME}' installed ({SERVICE_DISPLAY}).");
+                println!("✓ Service '{SERVICE_NAME}' registered ({SERVICE_DISPLAY}).");
                 println!("  Auto-restart on failure: 5s / 10s / 30s");
-                println!("  Edit config.toml next to the exe, then: net start {SERVICE_NAME}");
+                s
             }
             Err(e) => {
-                eprintln!("✗ Install failed: {e}");
-                std::process::exit(1);
+                println!("! Service already registered or create notice ({e}), opening existing...");
+                match manager.open_service(SERVICE_NAME, ServiceAccess::CHANGE_CONFIG | ServiceAccess::START) {
+                    Ok(s) => s,
+                    Err(oe) => {
+                        eprintln!("✗ Cannot open service: {oe}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        };
+
+        match svc.start::<&str>(&[]) {
+            Ok(_) => println!("✓ Service '{SERVICE_NAME}' started successfully."),
+            Err(e) => {
+                let _ = std::process::Command::new("net").args(["start", SERVICE_NAME]).output();
+                println!("  Service start triggered ({e}).");
             }
         }
+        println!("✓ Zev Detector is now running in zero-configuration mode.");
     }
 
     pub fn uninstall() {

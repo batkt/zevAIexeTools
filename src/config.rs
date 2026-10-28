@@ -5,8 +5,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
+    #[serde(default)]
     pub server: ServerConfig,
     #[serde(default)]
     pub agent: AgentConfig,
@@ -183,7 +184,7 @@ fn d_netqual_poll() -> u64 { 300 }
 fn d_ping_count() -> u32 { 10 }
 fn d_score_threshold() -> u32 { 70 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct PortEntry {
     pub port: u16,
     #[serde(default)]
@@ -369,7 +370,7 @@ fn d_channels() -> Vec<String> {
 
 // ─── windows services ────────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct ServiceEntry {
     /// Service key name as SCM knows it, e.g. "DahuaParkingService"
     pub name: String,
@@ -551,9 +552,236 @@ impl Default for HttpProbe {
     }
 }
 
-// ─── loading ─────────────────────────────────────────────────────────────────
+// ─── loading & zero-configuration defaults ───────────────────────────────────
 
 impl Config {
+    pub fn default_builtin() -> Self {
+        Self {
+            server: ServerConfig::default(),
+            agent: AgentConfig {
+                name: hostname(),
+                baiguullagiin_id: String::new(),
+                baiguullagiin_ner: String::new(),
+                barilgiin_id: String::new(),
+                heartbeat_interval_secs: d_heartbeat(),
+            },
+            eventlog: EventLogConfig::default(),
+            services: vec![
+                ServiceEntry {
+                    name: "DahuaParkingService".to_string(),
+                    label: "Dahua Parking (dahuarust)".to_string(),
+                    must_run: false,
+                    auto_restart: true,
+                    max_restarts_per_hour: 3,
+                    restart_grace_secs: 45,
+                },
+                ServiceEntry {
+                    name: "HikvisionParkingService".to_string(),
+                    label: "Hikvision Parking Service".to_string(),
+                    must_run: false,
+                    auto_restart: true,
+                    max_restarts_per_hour: 3,
+                    restart_grace_secs: 45,
+                },
+                ServiceEntry {
+                    name: "ZevWorker".to_string(),
+                    label: "Zev Worker".to_string(),
+                    must_run: false,
+                    auto_restart: true,
+                    max_restarts_per_hour: 3,
+                    restart_grace_secs: 45,
+                },
+            ],
+            logs: LogsConfig {
+                enabled: true,
+                poll_interval_secs: d_log_poll(),
+                files: vec![
+                    LogFileEntry {
+                        path: r"D:\zevtabs\dahuarust\dahuaExeRust\target\release\service.log".to_string(),
+                        glob: String::new(),
+                        system: "dahuarust".to_string(),
+                        modul: "dahua-service".to_string(),
+                        pattern: String::new(),
+                        ignore_pattern: String::new(),
+                        context_lines: 8,
+                    },
+                    LogFileEntry {
+                        path: r"C:\Program Files\Zevtabs\service.log".to_string(),
+                        glob: String::new(),
+                        system: "dahuarust".to_string(),
+                        modul: "dahua-service".to_string(),
+                        pattern: String::new(),
+                        ignore_pattern: String::new(),
+                        context_lines: 8,
+                    },
+                    LogFileEntry {
+                        path: r"D:\zevtabs\worker\logs".to_string(),
+                        glob: "*.log".to_string(),
+                        system: "worker".to_string(),
+                        modul: "worker-service".to_string(),
+                        pattern: String::new(),
+                        ignore_pattern: String::new(),
+                        context_lines: 8,
+                    },
+                ],
+            },
+            health: HealthConfig {
+                enabled: true,
+                poll_interval_secs: d_health_poll(),
+                cpu_threshold: 90.0,
+                mem_threshold: 90.0,
+                disk_threshold: 90.0,
+                http: vec![HttpProbe {
+                    name: "dahua api".to_string(),
+                    url: "http://127.0.0.1:5000/api/health".to_string(),
+                    expect: "OK".to_string(),
+                    timeout_secs: 5,
+                    system: "dahuarust".to_string(),
+                    service: "DahuaParkingService".to_string(),
+                    restart_after_failures: 3,
+                }],
+            },
+            update: UpdateConfig::default(),
+            netqual: NetQualConfig::default(),
+            ports: vec![
+                PortEntry {
+                    port: 5000,
+                    label: "Parking service".to_string(),
+                    host: "127.0.0.1".to_string(),
+                    must_listen: false,
+                },
+                PortEntry {
+                    port: 37777,
+                    label: "Dahua SDK".to_string(),
+                    host: "127.0.0.1".to_string(),
+                    must_listen: false,
+                },
+                PortEntry {
+                    port: 8000,
+                    label: "Hikvision SDK".to_string(),
+                    host: "127.0.0.1".to_string(),
+                    must_listen: false,
+                },
+            ],
+            timesync: TimeSyncConfig::default(),
+            cleanup: CleanupConfig::default(),
+            notify: NotifyConfig::default(),
+        }
+    }
+
+    pub fn apply_defaults(&mut self) {
+        if self.server.url.trim().is_empty() {
+            self.server.url = d_server_url();
+        }
+        while self.server.url.ends_with('/') {
+            self.server.url.pop();
+        }
+        if self.agent.name.trim().is_empty() {
+            self.agent.name = hostname();
+        }
+        if self.agent.heartbeat_interval_secs == 0 {
+            self.agent.heartbeat_interval_secs = d_heartbeat();
+        }
+
+        // Retain only services with non-empty name
+        self.services.retain(|s| !s.name.trim().is_empty());
+        for s in &mut self.services {
+            if s.label.trim().is_empty() {
+                s.label = s.name.clone();
+            }
+        }
+        if self.services.is_empty() {
+            self.services = Self::default_builtin().services;
+        }
+
+        // Retain only valid ports
+        self.ports.retain(|p| p.port > 0);
+        if self.ports.is_empty() {
+            self.ports = Self::default_builtin().ports;
+        }
+
+        // Retain only log targets with non-empty path
+        self.logs.files.retain(|f| !f.path.trim().is_empty());
+        if self.logs.files.is_empty() {
+            self.logs.files = Self::default_builtin().logs.files;
+        }
+
+        // Health probes
+        self.health.http.retain(|h| !h.url.trim().is_empty());
+        if self.health.http.is_empty() {
+            self.health.http = Self::default_builtin().health.http;
+        }
+
+        if self.update.github_repo.trim().is_empty() {
+            self.update.github_repo = d_update_repo();
+        }
+        if self.update.mode.trim().is_empty() {
+            self.update.mode = d_update_mode();
+        }
+    }
+
+    pub fn merge_json(&mut self, val: &serde_json::Value) {
+        if let Some(obj) = val.as_object() {
+            if let Some(services) = obj.get("services") {
+                if let Ok(s) = serde_json::from_value::<Vec<ServiceEntry>>(services.clone()) {
+                    self.services = s;
+                }
+            }
+            if let Some(ports) = obj.get("ports") {
+                if let Ok(p) = serde_json::from_value::<Vec<PortEntry>>(ports.clone()) {
+                    self.ports = p;
+                }
+            }
+            if let Some(health) = obj.get("health") {
+                if let Ok(h) = serde_json::from_value::<HealthConfig>(health.clone()) {
+                    self.health = h;
+                }
+            }
+            if let Some(netqual) = obj.get("netqual") {
+                if let Ok(n) = serde_json::from_value::<NetQualConfig>(netqual.clone()) {
+                    self.netqual = n;
+                }
+            }
+            if let Some(notify) = obj.get("notify") {
+                if let Ok(nt) = serde_json::from_value::<NotifyConfig>(notify.clone()) {
+                    self.notify = nt;
+                }
+            }
+            if let Some(update) = obj.get("update") {
+                if let Ok(u) = serde_json::from_value::<UpdateConfig>(update.clone()) {
+                    self.update = u;
+                }
+            }
+            if let Some(eventlog) = obj.get("eventlog") {
+                if let Ok(el) = serde_json::from_value::<EventLogConfig>(eventlog.clone()) {
+                    self.eventlog = el;
+                }
+            }
+            if let Some(cleanup) = obj.get("cleanup") {
+                if let Ok(c) = serde_json::from_value::<CleanupConfig>(cleanup.clone()) {
+                    self.cleanup = c;
+                }
+            }
+            if let Some(timesync) = obj.get("timesync") {
+                if let Ok(ts) = serde_json::from_value::<TimeSyncConfig>(timesync.clone()) {
+                    self.timesync = ts;
+                }
+            }
+            if let Some(agent) = obj.get("agent") {
+                if let Some(b_id) = agent.get("barilgiinId").and_then(|v| v.as_str()) {
+                    self.agent.barilgiin_id = b_id.to_string();
+                }
+                if let Some(b_ner) = agent.get("baiguullagiinNer").and_then(|v| v.as_str()) {
+                    self.agent.baiguullagiin_ner = b_ner.to_string();
+                }
+                if let Some(bg_id) = agent.get("baiguullagiinId").and_then(|v| v.as_str()) {
+                    self.agent.baiguullagiin_id = bg_id.to_string();
+                }
+            }
+            self.apply_defaults();
+        }
+    }
+
     pub fn exe_dir() -> PathBuf {
         std::env::current_exe()
             .ok()
@@ -561,19 +789,6 @@ impl Config {
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
-    /// Where config.toml, the queue, the read offsets and the log live.
-    ///
-    /// Two layouts are supported, and which one applies is decided by whether
-    /// a config.toml already sits next to the exe:
-    ///
-    /// * **Portable** — a folder holding the exes and a config.toml, used by
-    ///   `cargo run` and by anyone who just copies the files onto a machine.
-    ///   Everything stays in that one folder.
-    /// * **Installed** — the installer puts the exes in Program Files, which
-    ///   a standard user cannot write to. The desktop app runs unelevated by
-    ///   design, so it would fail to save; state goes to ProgramData instead,
-    ///   which the installer grants Users modify rights on and which the
-    ///   LocalSystem service can equally read.
     pub fn data_dir() -> PathBuf {
         let exe = Self::exe_dir();
         if exe.join("config.toml").exists() {
@@ -593,39 +808,32 @@ impl Config {
         Self::data_dir().join("config.toml")
     }
 
+    /// Loads config. If no config.toml exists, or if reading it encounters an error,
+    /// it automatically boots using full built-in defaults without failing.
     pub fn load() -> anyhow::Result<Self> {
         let path = Self::config_path();
-        let text = std::fs::read_to_string(&path)
-            .map_err(|e| anyhow::anyhow!("Cannot read {}: {e}", path.display()))?;
-        let mut cfg: Config = toml::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("config.toml parse error: {e}"))?;
-
-        if cfg.server.url.trim().is_empty() {
-            cfg.server.url = d_server_url();
-        }
-        while cfg.server.url.ends_with('/') {
-            cfg.server.url.pop();
-        }
-        if cfg.agent.name.is_empty() {
-            cfg.agent.name = hostname();
-        }
-        for s in &mut cfg.services {
-            if s.label.is_empty() {
-                s.label = s.name.clone();
+        let mut cfg = if path.exists() {
+            match std::fs::read_to_string(&path) {
+                Ok(text) => match toml::from_str(&text) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        log::warn!("config.toml parse error ({e}), using default built-in configuration");
+                        Self::default_builtin()
+                    }
+                },
+                Err(e) => {
+                    log::warn!("Cannot read {}: {e}, using default built-in configuration", path.display());
+                    Self::default_builtin()
+                }
             }
-        }
-        if cfg.update.github_repo.trim().is_empty() {
-            cfg.update.github_repo = d_update_repo();
-        }
-        if cfg.update.mode.trim().is_empty() {
-            cfg.update.mode = d_update_mode();
-        }
+        } else {
+            Self::default_builtin()
+        };
+
+        cfg.apply_defaults();
         Ok(cfg)
     }
 
-    /// Like `load()`, but never fails — used by the GUI, which needs
-    /// something to show even before config.toml exists or while it is
-    /// mid-edit and temporarily invalid.
     pub fn load_or_default() -> Self {
         Self::load().unwrap_or_default()
     }
@@ -641,6 +849,12 @@ impl Config {
         std::fs::write(&path, text)
             .map_err(|e| anyhow::anyhow!("Cannot write {}: {e}", path.display()))?;
         Ok(())
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::default_builtin()
     }
 }
 

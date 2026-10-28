@@ -90,10 +90,18 @@ pub struct Tushaal {
     pub parametr: serde_json::Value,
 }
 
-#[derive(Deserialize)]
-struct HeartbeatKhariu {
+#[derive(Deserialize, Default, Clone, Debug)]
+pub struct HeartbeatResponse {
     #[serde(default)]
-    tushaal: Vec<Tushaal>,
+    pub tushaal: Vec<Tushaal>,
+    #[serde(default)]
+    pub tokhirgoo: Option<serde_json::Value>,
+    #[serde(rename = "baiguullagiinId", default)]
+    pub baiguullagiin_id: Option<String>,
+    #[serde(rename = "baiguullagiinNer", default)]
+    pub baiguullagiin_ner: Option<String>,
+    #[serde(rename = "barilgiinId", default)]
+    pub barilgiin_id: Option<String>,
 }
 
 pub struct Sender {
@@ -241,8 +249,26 @@ impl Sender {
         self.disconnects.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Sends the heartbeat and returns whatever commands came back with it.
-    pub async fn heartbeat(&self, data: HeartbeatData) -> Vec<Tushaal> {
+    pub fn update_identity(&mut self, bg_id: Option<&str>, bg_ner: Option<&str>, b_id: Option<&str>) {
+        if let Some(id) = bg_id {
+            if !id.trim().is_empty() {
+                self.agent.baiguullagiin_id = id.trim().to_string();
+            }
+        }
+        if let Some(ner) = bg_ner {
+            if !ner.trim().is_empty() {
+                self.agent.baiguullagiin_ner = ner.trim().to_string();
+            }
+        }
+        if let Some(bid) = b_id {
+            if !bid.trim().is_empty() {
+                self.agent.barilgiin_id = bid.trim().to_string();
+            }
+        }
+    }
+
+    /// Sends the heartbeat and returns whatever commands and remote config came back with it.
+    pub async fn heartbeat(&mut self, data: HeartbeatData) -> HeartbeatResponse {
         let HeartbeatData { services, health, heals, network, ports, clock, dahua } = data;
         let url = format!("{}/detector/heartbeat", self.server.url);
         let body = Heartbeat {
@@ -263,16 +289,21 @@ impl Sender {
             dahua,
         };
         match self.post(&url, &body).await {
-            Ok(text) => match serde_json::from_str::<HeartbeatKhariu>(&text) {
-                Ok(khariu) => khariu.tushaal,
-                // Older servers answer with the bare string "Amjilttai", which
-                // is simply "no commands" — not an error worth logging loudly.
-                Err(_) => Vec::new(),
+            Ok(text) => match serde_json::from_str::<HeartbeatResponse>(&text) {
+                Ok(khariu) => {
+                    self.update_identity(
+                        khariu.baiguullagiin_id.as_deref(),
+                        khariu.baiguullagiin_ner.as_deref(),
+                        khariu.barilgiin_id.as_deref(),
+                    );
+                    khariu
+                }
+                Err(_) => HeartbeatResponse::default(),
             },
             Err(e) => {
                 log::debug!("Heartbeat failed: {e}");
                 self.disconnects.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                Vec::new()
+                HeartbeatResponse::default()
             }
         }
     }

@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub async fn run_app(cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<()> {
+pub async fn run_app(mut cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<()> {
     info!("=== Zev Detector {} starting ===", sender::AGENT_VERSION);
     info!("Agent: {} → {}", cfg.agent.name, cfg.server.url);
 
@@ -232,7 +232,7 @@ pub async fn run_app(cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<()> {
 
         if now >= due_beat {
             due_beat = now + beat_int;
-            let tushaaluud = out
+            let resp = out
                 .heartbeat(sender::HeartbeatData {
                     services: svc.snapshot(),
                     health: hlth.snapshot(),
@@ -245,10 +245,37 @@ pub async fn run_app(cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<()> {
                 })
                 .await;
 
-            // Commands ride back on the heartbeat because nothing can reach
-            // these machines from outside. Run them one at a time: two updates
-            // touching the same service at once would fight over its exe.
-            for t in &tushaaluud {
+            // Apply remote dynamic configuration from backend if present
+            if let Some(tokhirgoo) = resp.tokhirgoo {
+                if !tokhirgoo.is_null() && tokhirgoo.as_object().map_or(false, |o| !o.is_empty()) {
+                    let old_services = cfg.services.clone();
+                    let old_ports = cfg.ports.clone();
+                    cfg.merge_json(&tokhirgoo);
+
+                    if let Some(bid) = resp.barilgiin_id {
+                        if !bid.is_empty() { cfg.agent.barilgiin_id = bid; }
+                    }
+                    if let Some(bname) = resp.baiguullagiin_ner {
+                        if !bname.is_empty() { cfg.agent.baiguullagiin_ner = bname; }
+                    }
+                    if let Some(bgid) = resp.baiguullagiin_id {
+                        if !bgid.is_empty() { cfg.agent.baiguullagiin_id = bgid; }
+                    }
+
+                    if cfg.services != old_services {
+                        info!("Applying remote services update ({} service(s))", cfg.services.len());
+                        svc = services::ServiceCollector::new(cfg.services.clone());
+                        healer = heal::Healer::new(cfg.services.clone());
+                    }
+                    if cfg.ports != old_ports {
+                        info!("Applying remote ports update ({} port(s))", cfg.ports.len());
+                        prts = ports::PortCollector::new(cfg.ports.clone());
+                    }
+                    let _ = cfg.save();
+                }
+            }
+
+            for t in &resp.tushaal {
                 let result = exec.run(t).await;
                 if result.amjilttai {
                     info!("Command {} ({}) done", t.id, t.turul);
