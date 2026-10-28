@@ -18,8 +18,19 @@
 use crate::config::NetQualConfig;
 use crate::event::{DetectorEvent, Severity, Source};
 use log::debug;
+use once_cell::sync::Lazy;
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+static LAST_SPEED: Lazy<Mutex<Option<(f64, f64, String)>>> = Lazy::new(|| Mutex::new(None));
+
+pub fn update_speed_metrics(download_mbps: f64, upload_mbps: f64) {
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    if let Ok(mut lock) = LAST_SPEED.lock() {
+        *lock = Some((download_mbps, upload_mbps, now));
+    }
+}
 
 pub struct Measurement {
     /// Median TCP connect time to the server, in ms. None if unreachable.
@@ -91,12 +102,22 @@ impl NetQualCollector {
             score: score(latency_ms, loss_percent, disconnects),
         };
 
+        let (dl, ul, tested_at) = LAST_SPEED
+            .lock()
+            .ok()
+            .and_then(|lock| lock.clone())
+            .map(|(d, u, t)| (Some(d), Some(u), Some(t)))
+            .unwrap_or((None, None, None));
+
         self.last = serde_json::json!({
             "score": m.score,
             "latencyMs": m.latency_ms,
             "lossPercent": m.loss_percent,
             "disconnects": m.disconnects,
             "host": self.host,
+            "downloadMbps": dl,
+            "uploadMbps": ul,
+            "speedTestedAt": tested_at,
         });
         debug!(
             "Network: score={:?} latency={:?}ms loss={:?}%",

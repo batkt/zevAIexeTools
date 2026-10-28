@@ -25,6 +25,7 @@ pub const TURLUUD: &[&str] = &[
     "diagService",
     "diagDisk",
     "diagEvents",
+    "diagSpeed",
 ];
 
 pub async fn run(kind: &str, target: &str, cfg: &Config) -> anyhow::Result<String> {
@@ -39,6 +40,7 @@ pub async fn run(kind: &str, target: &str, cfg: &Config) -> anyhow::Result<Strin
         "diagService" => service(target),
         "diagDisk" => Ok(disk()),
         "diagEvents" => events(cfg),
+        "diagSpeed" => speed().await,
         other => anyhow::bail!("Unknown diagnostic: {other}"),
     }
 }
@@ -283,4 +285,47 @@ fn events(cfg: &Config) -> anyhow::Result<String> {
         .map(|e| format!("[{}] {} :: {}", e.aldaanii_tuvshin, e.modul, e.aldaanii_msg))
         .collect::<Vec<_>>()
         .join("\n"))
+}
+
+/// Measures actual Internet Download and Upload speed using Cloudflare Speed Test Edge.
+pub async fn speed() -> anyhow::Result<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .danger_accept_invalid_certs(true)
+        .build()?;
+
+    // 1. Download test (5MB chunk from Cloudflare CDN)
+    let dl_url = "https://speed.cloudflare.com/__down?bytes=5000000";
+    let start_dl = Instant::now();
+    let resp = client.get(dl_url).send().await?;
+    if !resp.status().is_success() {
+        anyhow::bail!("Download speed test HTTP error: {}", resp.status());
+    }
+    let bytes = resp.bytes().await?;
+    let dl_duration = start_dl.elapsed();
+    let dl_secs = dl_duration.as_secs_f64().max(0.001);
+    let dl_mbps = (bytes.len() as f64 * 8.0) / (dl_secs * 1_000_000.0);
+
+    // 2. Upload test (1MB payload)
+    let ul_url = "https://speed.cloudflare.com/__up";
+    let payload = vec![0u8; 1024 * 1024]; // 1 MB
+    let start_ul = Instant::now();
+    let up_resp = client.post(ul_url).body(payload.clone()).send().await?;
+    let ul_duration = start_ul.elapsed();
+    let ul_secs = ul_duration.as_secs_f64().max(0.001);
+    let ul_mbps = if up_resp.status().is_success() {
+        (payload.len() as f64 * 8.0) / (ul_secs * 1_000_000.0)
+    } else {
+        0.0
+    };
+
+    let dl_rounded = (dl_mbps * 100.0).round() / 100.0;
+    let ul_rounded = (ul_mbps * 100.0).round() / 100.0;
+
+    crate::netqual::update_speed_metrics(dl_rounded, ul_rounded);
+
+    Ok(format!(
+        "Хурдны шалгалт (Cloudflare CDN Edge):\n  Татах хурд (Download): {dl_rounded} Mbps ({:.2}s)\n  Илгээх хурд (Upload): {ul_rounded} Mbps ({:.2}s)\n  Цаг: {}",
+        dl_secs, ul_secs, chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+    ))
 }

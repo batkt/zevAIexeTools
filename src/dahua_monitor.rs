@@ -169,11 +169,42 @@ pub fn collect_recent_logs(path: &Path) -> (Vec<DahuaLogRecord>, usize) {
     (ring_buffer.into_iter().collect(), total)
 }
 
+/// Queries the live in-memory log buffer from dahua-service via localhost HTTP API.
+pub fn fetch_live_api_logs(port: u16) -> Option<Vec<DahuaLogRecord>> {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    let mut stream = TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        Duration::from_millis(250),
+    ).ok()?;
+    stream.set_read_timeout(Some(Duration::from_millis(500))).ok()?;
+    stream.set_write_timeout(Some(Duration::from_millis(250))).ok()?;
+
+    let req = format!(
+        "GET /api/recentLogs HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nAccept: application/json\r\n\r\n"
+    );
+    stream.write_all(req.as_bytes()).ok()?;
+
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).ok()?;
+
+    let resp_str = String::from_utf8_lossy(&response);
+    if let Some(body_start) = resp_str.find("\r\n\r\n") {
+        let body = &resp_str[body_start + 4..];
+        if let Ok(records) = serde_json::from_str::<Vec<DahuaLogRecord>>(body) {
+            return Some(records);
+        }
+    }
+    None
+}
+
 pub const ALT_SERVICE_NAME: &str = "ParkingService";
 pub const ALT_DISPLAY_NAME: &str = "zevzogsoolrust";
 
 /// Inspects DahuaParkingService / ParkingService status, checks ports 5000 and 37777,
-/// extracts the 10 most recent logs, and saves the snapshot to disk.
+/// extracts recent logs directly from live exe API or fallback log file, and saves the snapshot to disk.
 pub fn get_dahua_status() -> DahuaStatusSnapshot {
     let mut active_svc_name = DAHUA_SERVICE_NAME.to_string();
     let mut active_disp_name = DAHUA_DISPLAY_NAME.to_string();
@@ -200,19 +231,50 @@ pub fn get_dahua_status() -> DahuaStatusSnapshot {
     let api_port_5000_open = ports::is_open_timeout("127.0.0.1", DAHUA_API_PORT, local_timeout);
     let netsdk_port_37777_open = ports::is_open_timeout("127.0.0.1", DAHUA_NETSDK_PORT, local_timeout);
 
+    // Pull directly from live exe API if Port 5000 is open
+    let (recent_logs, total_records, log_path_display, log_exists, live_api_active) =
+        if api_port_5000_open {
+            if let Some(api_logs) = fetch_live_api_logs(DAHUA_API_PORT) {
+                let total = api_logs.len();
+                let ring: Vec<DahuaLogRecord> = api_logs
+                    .into_iter()
+                    .rev()
+                    .take(MAX_RING_BUFFER_RECORDS)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
+                (ring, total, format!("http://127.0.0.1:{DAHUA_API_PORT}/api/recentLogs (Live Exe API)"), true, true)
+            } else {
+                let log_path_buf = find_dahua_log_path();
+                let exists = log_path_buf.exists();
+                let (logs, total) = collect_recent_logs(&log_path_buf);
+                (logs, total, log_path_buf.display().to_string(), exists, false)
+            }
+        } else {
+            let log_path_buf = find_dahua_log_path();
+            let exists = log_path_buf.exists();
+            let (logs, total) = collect_recent_logs(&log_path_buf);
+            (logs, total, log_path_buf.display().to_string(), exists, false)
+        };
+
     // If SCM says stopped or not installed, but Port 5000 is listening, it is active in standalone/console mode
     let is_active = observed.is_running() || api_port_5000_open;
     let effective_state = if observed.is_running() {
-        observed.state
+        if live_api_active {
+            format!("{} (Live API Connected)", observed.state)
+        } else {
+            observed.state
+        }
     } else if api_port_5000_open {
-        "Running (Port 5000 Active)".to_string()
+        if live_api_active {
+            "Running (Live Exe API Connected)".to_string()
+        } else {
+            "Running (Port 5000 Active)".to_string()
+        }
     } else {
         observed.state
     };
-
-    let log_path_buf = find_dahua_log_path();
-    let log_exists = log_path_buf.exists();
-    let (recent_logs, total_records) = collect_recent_logs(&log_path_buf);
 
     let snapshot = DahuaStatusSnapshot {
         service_name: active_svc_name,
@@ -223,7 +285,7 @@ pub fn get_dahua_status() -> DahuaStatusSnapshot {
         exit_code: observed.exit_code,
         api_port_5000_open,
         netsdk_port_37777_open,
-        log_path: log_path_buf.display().to_string(),
+        log_path: log_path_display,
         log_exists,
         total_records,
         recent_logs,
@@ -323,5 +385,11 @@ mod tests {
         assert_eq!(logs.last().unwrap().message, "Record number 25");
 
         let _ = fs::remove_file(test_log);
+    }
+
+    #[test]
+    fn test_fetch_live_api_logs_returns_none_when_unreachable() {
+        let res = fetch_live_api_logs(59999);
+        assert!(res.is_none());
     }
 }

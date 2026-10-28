@@ -61,6 +61,14 @@ fn main() {
             }
             println!("DahuaParkingService restart completed.");
         }
+        Some("speed") => {
+            println!("Интернэт хурд хэмжиж байна (Cloudflare CDN Edge)...");
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            match rt.block_on(zev_detector::diag::speed()) {
+                Ok(res) => println!("{res}"),
+                Err(e) => eprintln!("Speedtest failed: {e}"),
+            }
+        }
         Some("run") => run_interactive(),
         Some("test") => run_test(),
         Some("--version") | Some("-v") => println!("zev-detector {}", sender::AGENT_VERSION),
