@@ -257,6 +257,9 @@ pub async fn run_app(cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<()> {
                 }
                 out.tushaal_khariu(&t.id, result.amjilttai, &result.ur_dun, &result.aldaa)
                     .await;
+                if t.turul == "diagSpeed" && result.amjilttai {
+                    due_beat = now;
+                }
             }
         }
 

@@ -59,7 +59,15 @@ impl NetQualCollector {
     }
 
     pub fn snapshot(&self) -> serde_json::Value {
-        self.last.clone()
+        let mut val = self.last.clone();
+        if let Some((dl, ul, tested_at)) = LAST_SPEED.lock().ok().and_then(|lock| lock.clone()) {
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert("downloadMbps".into(), serde_json::json!(dl));
+                obj.insert("uploadMbps".into(), serde_json::json!(ul));
+                obj.insert("speedTestedAt".into(), serde_json::json!(tested_at));
+            }
+        }
+        val
     }
 
     pub fn last_metrics(&self) -> (Option<u8>, Option<u64>, Option<f32>) {
