@@ -83,7 +83,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#UiExe}"; Tasks: desktopicon
 ; Auto-install and start the Windows service immediately with zero-config
 Filename: "{app}\{#AgentExe}"; Parameters: "install"; Flags: runhidden waituntilterminated
 Filename: "{app}\{#UiExe}"; Description: "Open {#AppName}"; \
-  Flags: postinstall nowait skipifsilent unchecked
+  Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 ; Stop before delete: a running service holds the exe open and would leave the

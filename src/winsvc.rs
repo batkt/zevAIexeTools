@@ -167,7 +167,7 @@ mod imp {
             service_type: ServiceType::OWN_PROCESS,
             start_type: ServiceStartType::AutoStart,
             error_control: ServiceErrorControl::Normal,
-            executable_path: exe,
+            executable_path: exe.clone(),
             launch_arguments: vec![],
             dependencies: vec![],
             // LocalSystem — needed to read the Security channel and query
@@ -197,6 +197,14 @@ mod imp {
             }
             Err(e) => {
                 println!("! Service already registered or create notice ({e}), opening existing...");
+                let exe_str = exe.to_string_lossy();
+                let _ = std::process::Command::new("sc")
+                    .args([
+                        "config",
+                        SERVICE_NAME,
+                        &format!("binPath= \"{}\"", exe_str),
+                    ])
+                    .output();
                 match manager.open_service(SERVICE_NAME, ServiceAccess::CHANGE_CONFIG | ServiceAccess::START) {
                     Ok(s) => s,
                     Err(oe) => {

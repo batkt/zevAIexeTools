@@ -340,8 +340,15 @@ fn main() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::DoubleClick { .. } = event {
-                        show_main_window(tray.app_handle());
+                    match event {
+                        TrayIconEvent::Click {
+                            button: tauri::tray::MouseButton::Left,
+                            ..
+                        }
+                        | TrayIconEvent::DoubleClick { .. } => {
+                            show_main_window(tray.app_handle());
+                        }
+                        _ => {}
                     }
                 });
 
@@ -349,6 +356,10 @@ fn main() {
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+
+            // Automatically open and bring the window to the front on startup
+            show_main_window(app.handle());
+
             Ok(())
         })
         .on_window_event(|window, event| {

@@ -19,6 +19,8 @@
         "resizable": true,
         "center": true,
         "decorations": true,
+        "visible": true,
+        "focus": true,
         "theme": null
       }
     ],
