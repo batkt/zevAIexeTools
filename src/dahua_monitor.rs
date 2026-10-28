@@ -18,6 +18,8 @@ use std::path::{Path, PathBuf};
 
 pub const DAHUA_SERVICE_NAME: &str = "DahuaParkingService";
 pub const DAHUA_DISPLAY_NAME: &str = "zevDahuaRust";
+pub const HIK_SERVICE_NAME: &str = "zevHikvision";
+pub const HIK_DISPLAY_NAME: &str = "zevHikvision";
 pub const DAHUA_API_PORT: u16 = 5000;
 pub const DAHUA_NETSDK_PORT: u16 = 37777;
 pub const MAX_RING_BUFFER_RECORDS: usize = 10;
@@ -94,19 +96,26 @@ pub fn find_dahua_log_path() -> PathBuf {
     for entry in &cfg.logs.files {
         let p = Path::new(&entry.path);
         let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-        if (name.eq_ignore_ascii_case("service.log") || entry.path.to_lowercase().contains("dahua"))
+        if (name.eq_ignore_ascii_case("service.log") 
+            || name.eq_ignore_ascii_case("hikvision-service.log")
+            || entry.path.to_lowercase().contains("dahua")
+            || entry.path.to_lowercase().contains("hikvision"))
             && p.exists()
         {
             return p.to_path_buf();
         }
     }
 
-    // 2. Check SCM service exe path
-    if let Ok(exe) = services::exe_path(DAHUA_SERVICE_NAME) {
-        if let Some(parent) = exe.parent() {
-            let candidate = parent.join("service.log");
-            if candidate.exists() {
-                return candidate;
+    // 2. Check SCM service exe path (Dahua or Hikvision)
+    for svc in &[DAHUA_SERVICE_NAME, HIK_SERVICE_NAME, ALT_SERVICE_NAME] {
+        if let Ok(exe) = services::exe_path(svc) {
+            if let Some(parent) = exe.parent() {
+                for log_name in &["service.log", "hikvision-service.log"] {
+                    let candidate = parent.join(log_name);
+                    if candidate.exists() {
+                        return candidate;
+                    }
+                }
             }
         }
     }
@@ -116,13 +125,19 @@ pub fn find_dahua_log_path() -> PathBuf {
     if primary.exists() {
         return primary;
     }
+    let hik_primary = PathBuf::from(r"D:\zevtabs\hikRustExe\target\release\hikvision-service.log");
+    if hik_primary.exists() {
+        return hik_primary;
+    }
 
     // 4. Secondary fallback candidates
     let fallbacks = [
+        r"C:\Program Files\zevHikvision\hikvision-service.log",
         r"C:\Program Files\zevDahuaRust\service.log",
         r"C:\Program Files\DahuaParkingService\service.log",
         r"D:\zolbayar\dahua-service\target\release\service.log",
         r"C:\ProgramData\Zev Detector\service.log",
+        r"C:\ProgramData\Zev Detector\hikvision-service.log",
     ];
 
     for fb in fallbacks {
@@ -216,7 +231,18 @@ pub fn get_dahua_status() -> DahuaStatusSnapshot {
         exit_code: 0,
     });
 
-    // 2. If not running, check ParkingService
+    // 2. If not running, check zevHikvision
+    if !observed.is_running() {
+        if let Ok(hik_obs) = services::query(HIK_SERVICE_NAME) {
+            if hik_obs.is_running() {
+                active_svc_name = HIK_SERVICE_NAME.to_string();
+                active_disp_name = HIK_DISPLAY_NAME.to_string();
+                observed = hik_obs;
+            }
+        }
+    }
+
+    // 3. If still not running, check ParkingService
     if !observed.is_running() {
         if let Ok(alt_obs) = services::query(ALT_SERVICE_NAME) {
             if alt_obs.is_running() {
