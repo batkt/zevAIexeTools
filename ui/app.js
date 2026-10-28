@@ -850,7 +850,7 @@ window.addEventListener("keydown", (e) => {
 });
 
 function initUpdatePage() {
-  const curVer = info?.version || "1.5.0";
+  const curVer = info?.version || "1.6.0";
   const el = $("#update-current-ver");
   if (el) el.textContent = `v${curVer}`;
 }
