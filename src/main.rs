@@ -89,6 +89,10 @@ fn print_dahua_status() {
     for (i, rec) in s.recent_logs.iter().enumerate() {
         println!("    [{}] [{}] [{}] {}", i + 1, rec.timestamp, rec.level, rec.message);
     }
+    println!("  Recent {} images:", s.recent_images.len());
+    for (i, img) in s.recent_images.iter().enumerate() {
+        println!("    [{}] {} ({}) has_base64: {}", i + 1, img.plate, img.filename, img.base64.is_some());
+    }
 }
 
 fn print_help() {

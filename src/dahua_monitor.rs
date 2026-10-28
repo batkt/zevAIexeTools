@@ -347,18 +347,24 @@ pub fn collect_recent_images() -> (Vec<ParkingImageRecord>, Option<String>, Opti
             let size_bytes = fs::metadata(&file_path).map(|m| m.len() as usize).unwrap_or(0);
             let time_str = chrono::DateTime::<Local>::from(mtime).format("%Y-%m-%d %H:%M:%S").to_string();
             
-            // Format: <plate>_<timestamp>_<provider>.jpg
+            // Filename format: <HHmmss>_<plate>_<camera_ip>.jpg
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
             let parts: Vec<&str> = stem.split('_').collect();
-            let plate = parts.get(0).copied().unwrap_or("Машин").to_string();
-            let provider = parts.get(2).copied().unwrap_or("camera").to_string();
+            let (plate, cam_ip) = if parts.len() >= 3 && parts[0].len() == 6 && parts[0].chars().all(|c| c.is_ascii_digit()) {
+                (parts[1].to_string(), parts[2..].join(".").replace('_', "."))
+            } else if parts.len() >= 2 {
+                (parts[0].to_string(), parts[1].to_string())
+            } else {
+                (stem.to_string(), "127.0.0.1".to_string())
+            };
+            let provider = "hikvision".to_string();
             let rel_path = file_path.to_string_lossy().to_string();
 
             images.push(ParkingImageRecord {
                 filename,
                 plate,
                 timestamp: time_str,
-                camera_ip: "127.0.0.1".to_string(),
+                camera_ip: cam_ip,
                 provider,
                 size_bytes,
                 relative_path: rel_path,
@@ -367,44 +373,67 @@ pub fn collect_recent_images() -> (Vec<ParkingImageRecord>, Option<String>, Opti
         }
     }
 
-    // 3. For the latest image, read and create base64 thumbnail
+    // 3. For all recent images, read and create base64 data URLs so any admin on any network can see them
     let mut latest_base64 = None;
     let mut latest_plate = None;
     let mut latest_time = None;
 
-    if let Some(first) = images.first() {
-        latest_plate = Some(first.plate.clone());
-        latest_time = Some(first.timestamp.clone());
+    let roots = find_image_root_dirs();
+    use base64::prelude::*;
 
-        let cand_path = PathBuf::from(&first.relative_path);
-        let path_to_read = if cand_path.exists() {
-            Some(cand_path)
-        } else {
-            let mut resolved = None;
-            for root in find_image_root_dirs() {
-                let candidate = root.join(&first.filename);
-                if candidate.exists() {
-                    resolved = Some(candidate);
-                    break;
+    for (idx, img) in images.iter_mut().enumerate() {
+        if idx == 0 {
+            latest_plate = Some(img.plate.clone());
+            latest_time = Some(img.timestamp.clone());
+        }
+
+        if img.base64.is_none() {
+            let cand_path = PathBuf::from(&img.relative_path);
+            let path_to_read = if cand_path.exists() && cand_path.is_file() {
+                Some(cand_path)
+            } else {
+                let mut resolved = None;
+                for root in &roots {
+                    let candidate = root.join(&img.filename);
+                    if candidate.exists() && candidate.is_file() {
+                        resolved = Some(candidate);
+                        break;
+                    }
+                    let with_rel = root.join(&img.relative_path);
+                    if with_rel.exists() && with_rel.is_file() {
+                        resolved = Some(with_rel);
+                        break;
+                    }
+                    if let Ok(entries) = fs::read_dir(root) {
+                        for entry in entries.flatten() {
+                            if entry.path().is_dir() {
+                                let sub_cand = entry.path().join(&img.filename);
+                                if sub_cand.exists() && sub_cand.is_file() {
+                                    resolved = Some(sub_cand);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if resolved.is_some() {
+                        break;
+                    }
                 }
-                let with_rel = root.join(&first.relative_path);
-                if with_rel.exists() {
-                    resolved = Some(with_rel);
-                    break;
+                resolved
+            };
+
+            if let Some(p) = path_to_read {
+                if let Ok(bytes) = fs::read(&p) {
+                    if bytes.len() >= 4 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes.len() <= 650_000 {
+                        let encoded = BASE64_STANDARD.encode(&bytes);
+                        img.base64 = Some(format!("data:image/jpeg;base64,{encoded}"));
+                    }
                 }
             }
-            resolved
-        };
+        }
 
-        if let Some(p) = path_to_read {
-            if let Ok(bytes) = fs::read(&p) {
-                // If it's valid JPEG SOI (0xFF, 0xD8) and size <= 350KB
-                if bytes.len() >= 4 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes.len() <= 350_000 {
-                    use base64::prelude::*;
-                    let encoded = BASE64_STANDARD.encode(&bytes);
-                    latest_base64 = Some(format!("data:image/jpeg;base64,{encoded}"));
-                }
-            }
+        if idx == 0 && img.base64.is_some() {
+            latest_base64 = img.base64.clone();
         }
     }
 
