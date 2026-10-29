@@ -1,6 +1,6 @@
 [package]
 name = "zev-detector"
-version = "1.7.0"
+version = "1.8.0"
 edition = "2021"
 description = "Zev Detector — Windows log / service / application activity and error detector"
 

@@ -17,7 +17,7 @@
 ; (run cargo build --release first)
 
 #define AppName        "Zev Detector"
-#define AppVersion     "1.7.0"
+#define AppVersion     "1.8.0"
 #define AppPublisher   "Zev Tabs LLC"
 #define AppURL         "https://admin.zevtabs.mn"
 #define UiExe          "zev-detector-ui.exe"
