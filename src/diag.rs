@@ -323,6 +323,7 @@ pub async fn speed() -> anyhow::Result<String> {
     let ul_rounded = (ul_mbps * 100.0).round() / 100.0;
 
     crate::netqual::update_speed_metrics(dl_rounded, ul_rounded);
+    crate::system_report::update_speed_report(dl_rounded, ul_rounded);
 
     Ok(format!(
         "Хурдны шалгалт (Cloudflare CDN Edge):\n  Татах хурд (Download): {dl_rounded} Mbps ({:.2}s)\n  Илгээх хурд (Upload): {ul_rounded} Mbps ({:.2}s)\n  Цаг: {}",

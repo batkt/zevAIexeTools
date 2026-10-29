@@ -139,7 +139,7 @@ impl HealthCollector {
         if !self.cfg.enabled {
             return Vec::new();
         }
-        let mut out = self.poll_system();
+        let mut out = self.poll_system().await;
         out.extend(self.poll_http().await);
         out
     }
@@ -148,7 +148,7 @@ impl HealthCollector {
         self.last_snapshot.clone()
     }
 
-    fn poll_system(&mut self) -> Vec<DetectorEvent> {
+    async fn poll_system(&mut self) -> Vec<DetectorEvent> {
         use sysinfo::{Disks, System};
 
         let mut sys = System::new();
@@ -166,8 +166,26 @@ impl HealthCollector {
             0.0
         };
 
+        let report = crate::system_report::generate_full_report(&mut sys).await;
+
         let mut out = Vec::new();
         let mut disk_report = Vec::new();
+
+        // Browser memory leak alert (> 2GB)
+        if let Some(ev) = self.edge("browser_leak", report.browser.is_leaking, |secs| {
+            let msg = if let Some(ref w) = report.browser.warning {
+                w.clone()
+            } else {
+                format!("Веб хөтөч санах ой хэтрүүлэн ашиглаж байна ({}м)", secs / 60)
+            };
+            DetectorEvent::new(Source::Health, Severity::Warning, "windows", "browser", msg)
+                .kod("health/browser/leak")
+                .meta("totalRamMb", report.browser.total_ram_mb)
+                .meta("processCount", report.browser.process_count)
+                .refingerprint()
+        }) {
+            out.push(ev);
+        }
 
         // Copied out of `self.cfg` first: `edge` takes `&mut self`, so the
         // closure cannot keep borrowing the config through `self`.
@@ -219,11 +237,13 @@ impl HealthCollector {
             let pct = (used as f64 / total as f64 * 100.0) as f32;
             let mount = disk.mount_point().to_string_lossy().to_string();
             let free_gb = disk.available_space() as f64 / 1e9;
+            let total_gb = total as f64 / 1e9;
 
             disk_report.push(serde_json::json!({
                 "mount": mount,
                 "usedPercent": (pct * 10.0).round() / 10.0,
                 "freeGb": (free_gb * 10.0).round() / 10.0,
+                "totalGb": (total_gb * 10.0).round() / 10.0,
             }));
 
             let key = format!("disk:{mount}");
@@ -256,8 +276,10 @@ impl HealthCollector {
             "cpuPercent": (cpu * 10.0).round() / 10.0,
             "memoryPercent": (mem_pct * 10.0).round() / 10.0,
             "totalMemoryGb": (total_mem / 1e9 * 10.0).round() / 10.0,
+            "usedMemoryGb": (used_mem / 1e9 * 10.0).round() / 10.0,
             "disks": disk_report,
             "uptimeSecs": System::uptime(),
+            "systemReport": report,
         });
 
         out

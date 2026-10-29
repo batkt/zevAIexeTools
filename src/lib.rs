@@ -40,6 +40,7 @@ pub mod ports;
 pub mod runner;
 pub mod sender;
 pub mod services;
+pub mod system_report;
 pub mod timesync;
 pub mod tushaal;
 pub mod update;
