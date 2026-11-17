@@ -333,6 +333,52 @@ fn bring_existing_to_front() -> bool {
     false
 }
 
+#[tauri::command]
+async fn kiosk_launch() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let cfg = Config::load_or_default();
+        zev_detector::kiosk::launch(&cfg.kiosk)
+            .map(|_| "Kiosk хөтөч амжилттай нээгдлээ.".to_string())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn kiosk_setup() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let cfg = Config::load_or_default();
+        zev_detector::kiosk::setup_autostart(&cfg.kiosk)
+            .map(|_| "Kiosk autostart амжилттай тохируулагдлаа.".to_string())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn kiosk_test_login(url: String, username: String, password: String) -> Result<String, String> {
+    zev_detector::kiosk::test_credentials(&url, &username, &password).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KioskStatusInfo {
+    pub is_running: bool,
+    pub browser_path: Option<String>,
+}
+
+#[tauri::command]
+fn get_kiosk_status(browser: String) -> KioskStatusInfo {
+    let p = zev_detector::kiosk::detect_browser(&browser);
+    let is_running = zev_detector::kiosk::is_browser_running(&browser);
+    KioskStatusInfo {
+        is_running,
+        browser_path: p.map(|x| x.display().to_string()),
+    }
+}
+
 fn main() {
     if bring_existing_to_front() {
         return;
@@ -358,6 +404,10 @@ fn main() {
             list_installed_services,
             check_update,
             apply_update,
+            kiosk_launch,
+            kiosk_setup,
+            kiosk_test_login,
+            get_kiosk_status,
         ])
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Нээх", true, None::<&str>)?;

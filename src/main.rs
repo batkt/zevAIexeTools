@@ -95,6 +95,49 @@ fn main() {
                 Err(e) => eprintln!("Шинэчлэхэд алдаа гарлаа: {e}"),
             }
         }
+        Some("kiosk-launch") => {
+            println!("Kiosk browser нээж байна...");
+            let cfg = Config::load_or_default();
+            match zev_detector::kiosk::launch(&cfg.kiosk) {
+                Ok(_) => {
+                    println!("Kiosk эхлүүлэгч ажиллаж байна. Автомат нэвтрэлтийг шалгаж байна...");
+                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    println!("Kiosk амжилттай нээгдлээ.");
+                }
+                Err(e) => eprintln!("Kiosk нээхэд алдаа: {e}"),
+            }
+        }
+        Some("kiosk-setup") => {
+            println!("Kiosk autostart болон тохиргоог суулгаж байна...");
+            let cfg = Config::load_or_default();
+            match zev_detector::kiosk::setup_autostart(&cfg.kiosk) {
+                Ok(_) => println!("Kiosk autostart амжилттай тохируулагдлаа."),
+                Err(e) => eprintln!("Kiosk autostart суулгахад алдаа: {e}"),
+            }
+        }
+        Some("kiosk-status") => {
+            let cfg = Config::load_or_default();
+            println!("=== Zev Kiosk Status ===");
+            println!("Enabled    : {}", cfg.kiosk.enabled);
+            println!("URL        : {}", cfg.kiosk.url);
+            println!("Browser    : {}", cfg.kiosk.browser);
+            println!("Mode       : {}", cfg.kiosk.mode);
+            println!("Autostart  : {}", cfg.kiosk.autostart);
+            println!("Auto-heal  : {}", cfg.kiosk.auto_heal);
+            println!("User       : {}", if cfg.kiosk.username.is_empty() { "(none)" } else { &cfg.kiosk.username });
+            let detected = zev_detector::kiosk::detect_browser(&cfg.kiosk.browser);
+            println!("Exe Path   : {}", detected.map(|p| p.display().to_string()).unwrap_or_else(|| "Not found".to_string()));
+            println!("Running    : {}", if zev_detector::kiosk::is_browser_running(&cfg.kiosk.browser) { "Active" } else { "Not running" });
+        }
+        Some("kiosk-test-login") => {
+            let cfg = Config::load_or_default();
+            println!("'{}' хаягаар '{}' хэрэглэгчийн эрхийг шалгаж байна...", cfg.kiosk.url, cfg.kiosk.username);
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            match rt.block_on(zev_detector::kiosk::test_credentials(&cfg.kiosk.url, &cfg.kiosk.username, &cfg.kiosk.password)) {
+                Ok(msg) => println!("Нэвтрэх эрх: {msg}"),
+                Err(e) => eprintln!("Шалгалт амжилтгүй: {e}"),
+            }
+        }
         Some("run") => run_interactive(),
         Some("test") => run_test(),
         Some("--version") | Some("-v") => println!("zev-detector {}", sender::AGENT_VERSION),

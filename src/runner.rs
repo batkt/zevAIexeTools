@@ -5,7 +5,7 @@
 
 use crate::config::Config;
 use crate::{
-    cleanup, event, eventlog, heal, health, logwatch, netqual, notify, ports, sender, services, timesync,
+    cleanup, event, eventlog, heal, health, kiosk, logwatch, netqual, notify, ports, sender, services, timesync,
     tushaal, update,
 };
 use chrono::{Datelike, Timelike};
@@ -57,6 +57,18 @@ pub async fn run_app(mut cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<(
     .kod("detector/started")
     .refingerprint()]);
 
+    if cfg.kiosk.enabled {
+        info!("Kiosk mode enabled: {} (autostart={}, auto_heal={})", cfg.kiosk.url, cfg.kiosk.autostart, cfg.kiosk.auto_heal);
+        if let Err(e) = kiosk::setup_autostart(&cfg.kiosk) {
+            log::warn!("Kiosk autostart setup warning: {e}");
+        }
+        if cfg.kiosk.autostart {
+            if let Err(e) = kiosk::launch(&cfg.kiosk) {
+                log::warn!("Initial kiosk launch warning: {e}");
+            }
+        }
+    }
+
     let mut due_evt = Instant::now();
     let mut due_svc = Instant::now();
     let mut due_log = Instant::now();
@@ -72,6 +84,7 @@ pub async fn run_app(mut cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<(
     let mut due_update = Instant::now() + Duration::from_secs(120);
     let mut due_cleanup = Instant::now() + Duration::from_secs(90);
     let mut due_notify = Instant::now() + Duration::from_secs(2);
+    let mut due_kiosk = Instant::now() + Duration::from_secs(10);
     let mut last_cleanup_day: Option<String> = None;
 
     let evt_int = Duration::from_secs(cfg.eventlog.poll_interval_secs.max(5));
@@ -84,6 +97,7 @@ pub async fn run_app(mut cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<(
     let clock_int = Duration::from_secs(cfg.timesync.poll_interval_secs.max(60));
     let update_int = Duration::from_secs(cfg.update.check_interval_hours.max(1) * 3600);
     let notify_int = Duration::from_secs(15);
+    let kiosk_int = Duration::from_secs(30);
 
     while !stop.load(Ordering::Relaxed) {
         let now = Instant::now();
@@ -223,6 +237,11 @@ pub async fn run_app(mut cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<(
                 healer.last_limit_hit(),
             );
             crate::dahua_monitor::get_dahua_status();
+        }
+
+        if cfg.kiosk.enabled && cfg.kiosk.auto_heal && now >= due_kiosk {
+            due_kiosk = now + kiosk_int;
+            kiosk::check_and_heal(&cfg.kiosk);
         }
 
         if now >= due_send {

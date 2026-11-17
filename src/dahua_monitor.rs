@@ -284,7 +284,10 @@ pub fn find_image_root_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     let candidates = [
         r"D:\zevtabs\parking_images",
+        r"C:\zevtabs\release\parking_images",
+        r"C:\zevtabs\parking_images",
         r"C:\ProgramData\parking_images",
+        r"C:\ProgramData\Zev Detector\parking_images",
         r"D:\zevtabs\dahuarust\dahuaExeRust\parking_images",
         r"D:\zevtabs\hikRustExe\parking_images",
         r"parking_images",

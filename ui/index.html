@@ -29,6 +29,7 @@
       <button class="nav-item" data-page="dahuarust"><i class="ico ico-svc"></i><span id="nav-dahua-title">Зогсоолын үйлчилгээ</span><span class="pill" id="dahua-sidebar-pill">…</span></button>
       <button class="nav-item" data-page="logfiles"><i class="ico ico-log"></i><span>Лог файл</span><span class="pill" id="count-logs">0</span></button>
       <button class="nav-item" data-page="health"><i class="ico ico-hp"></i><span>Эрүүл мэнд</span></button>
+      <button class="nav-item" data-page="kiosk"><i class="ico ico-svc"></i><span>Kiosk / Хөтөч</span></button>
       <div class="nav-label">Арчилгаа</div>
       <button class="nav-item" data-page="maintenance"><i class="ico ico-hp"></i><span>Цаг & цэвэрлэлт</span></button>
       <button class="nav-item" data-page="update"><i class="ico ico-cloud"></i><span>Шинэчлэлт</span></button>
@@ -257,6 +258,82 @@
             <label class="field"><span>Диск дүүрэхэд (%)</span><input type="number" min="0" max="100" data-bind="cleanup.disk_trigger_percent" /><small>Хуваарь хүлээхгүй. 0 = унтраах</small></label>
           </div>
           <label class="field"><span>Логийн дээд хэмжээ (MB)</span><input type="number" min="0" max="1024" data-bind="cleanup.log_max_mb" /><small>Хэтэрвэл .log.1 болгож сольж хадгална</small></label>
+        </div>
+      </section>
+
+      <!-- kiosk / browser auto-start -->
+      <section class="page" data-page="kiosk">
+        <div class="card">
+          <div class="row-between">
+            <div>
+              <h3>Kiosk ба хөтөч автоматаар нээх</h3>
+              <p class="muted">Компьютер асахад Chrome эсвэл Edge хөтөчийг автоматаар нээж, системд автоматаар нэвтрүүлнэ.</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" data-bind="kiosk.enabled">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="field-grid" style="margin-top: 16px;">
+            <div class="field" style="grid-column: span 2;">
+              <label>Вэб хаяг (URL)</label>
+              <input type="text" data-bind="kiosk.url" placeholder="https://turees.zevtabs.mn">
+            </div>
+
+            <div class="field">
+              <label>Хөтөч сонголт</label>
+              <select data-bind="kiosk.browser">
+                <option value="auto">Автомат (Edge эсвэл Chrome)</option>
+                <option value="edge">Microsoft Edge</option>
+                <option value="chrome">Google Chrome</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>Дэлгэцийн горим</label>
+              <select data-bind="kiosk.mode">
+                <option value="kiosk">Kiosk (Бүтэн дэлгэц)</option>
+                <option value="maximized">Томруулсан цонх (Maximized)</option>
+                <option value="app">App горим (Хаягийн мөргүй)</option>
+                <option value="normal">Энгийн цонх</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>Нэвтрэх нэр (Username)</label>
+              <input type="text" data-bind="kiosk.username" placeholder="CAdmin1">
+            </div>
+
+            <div class="field">
+              <label>Нууц үг (Password)</label>
+              <input type="password" data-bind="kiosk.password" placeholder="••••••••">
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 20px; margin-top: 16px; flex-wrap: wrap;">
+            <label class="checkbox-row">
+              <input type="checkbox" data-bind="kiosk.autostart">
+              <span>Компьютер асахад автоматаар нээх (Autostart)</span>
+            </label>
+
+            <label class="checkbox-row">
+              <input type="checkbox" data-bind="kiosk.auto_heal">
+              <span>Хөтөч хаагдвал автоматаар буцааж нээх (Auto-heal)</span>
+            </label>
+
+            <label class="checkbox-row">
+              <input type="checkbox" data-bind="kiosk.auto_login">
+              <span>Автомат нэвтрэлтийн шалгалт хийх</span>
+            </label>
+          </div>
+
+          <div style="margin-top: 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <button class="btn primary" id="btn-kiosk-launch">Хөтөч нээж турших ↗</button>
+            <button class="btn" id="btn-kiosk-setup">Autostart суулгах ⚙</button>
+            <button class="btn" id="btn-kiosk-test-login">Нэвтрэлт шалгах 🔑</button>
+            <span id="kiosk-status-text" class="muted" style="font-size: 0.9rem;"></span>
+          </div>
         </div>
       </section>
 

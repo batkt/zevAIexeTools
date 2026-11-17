@@ -33,6 +33,8 @@ pub struct Config {
     pub cleanup: CleanupConfig,
     #[serde(default)]
     pub notify: NotifyConfig,
+    #[serde(default)]
+    pub kiosk: KioskConfig,
 }
 
 // ─── clock ───────────────────────────────────────────────────────────────────
@@ -148,6 +150,58 @@ impl Default for NotifyConfig {
 fn d_notify_net_threshold() -> u8 { 70 }
 fn d_notify_disk_threshold() -> f32 { 90.0 }
 fn d_notify_cooldown() -> u64 { 15 }
+
+// ─── kiosk / browser auto-start ──────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct KioskConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "d_kiosk_url")]
+    pub url: String,
+    #[serde(default = "d_kiosk_browser")]
+    pub browser: String,
+    #[serde(default = "d_kiosk_mode")]
+    pub mode: String,
+    #[serde(default = "d_true")]
+    pub autostart: bool,
+    #[serde(default = "d_true")]
+    pub auto_heal: bool,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default = "d_true")]
+    pub auto_login: bool,
+}
+
+impl Default for KioskConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: d_kiosk_url(),
+            browser: d_kiosk_browser(),
+            mode: d_kiosk_mode(),
+            autostart: true,
+            auto_heal: true,
+            username: String::new(),
+            password: String::new(),
+            auto_login: true,
+        }
+    }
+}
+
+pub fn d_kiosk_url() -> String {
+    "https://turees.zevtabs.mn".to_string()
+}
+
+pub fn d_kiosk_browser() -> String {
+    "auto".to_string()
+}
+
+pub fn d_kiosk_mode() -> String {
+    "kiosk".to_string()
+}
 
 // ─── network quality ─────────────────────────────────────────────────────────
 
@@ -666,6 +720,7 @@ impl Config {
             timesync: TimeSyncConfig::default(),
             cleanup: CleanupConfig::default(),
             notify: NotifyConfig::default(),
+            kiosk: KioskConfig::default(),
         }
     }
 
@@ -718,6 +773,16 @@ impl Config {
         if self.update.mode.trim().is_empty() {
             self.update.mode = d_update_mode();
         }
+
+        if self.kiosk.url.trim().is_empty() {
+            self.kiosk.url = d_kiosk_url();
+        }
+        if self.kiosk.browser.trim().is_empty() {
+            self.kiosk.browser = d_kiosk_browser();
+        }
+        if self.kiosk.mode.trim().is_empty() {
+            self.kiosk.mode = d_kiosk_mode();
+        }
     }
 
     pub fn merge_json(&mut self, val: &serde_json::Value) {
@@ -765,6 +830,11 @@ impl Config {
             if let Some(timesync) = obj.get("timesync") {
                 if let Ok(ts) = serde_json::from_value::<TimeSyncConfig>(timesync.clone()) {
                     self.timesync = ts;
+                }
+            }
+            if let Some(kiosk) = obj.get("kiosk") {
+                if let Ok(k) = serde_json::from_value::<KioskConfig>(kiosk.clone()) {
+                    self.kiosk = k;
                 }
             }
             if let Some(agent) = obj.get("agent") {

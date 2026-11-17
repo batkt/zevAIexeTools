@@ -70,6 +70,8 @@ impl Executor {
             "testAjilluulakh" => self.test(),
             "agentShinechlekh" => self.update_agent().await,
             "tsevejluulekh" => self.cleanup(t),
+            "kioskAsaakh" => self.launch_kiosk().await,
+            "kioskTokhirgokh" => self.configure_kiosk(t).await,
             // Read-only diagnostics all share one arm; they cannot change
             // anything, so they need none of the confirmation the others do.
             kind if crate::diag::TURLUUD.contains(&kind) => self.diagnose(kind, &t.tulkhuur).await,
@@ -98,6 +100,47 @@ impl Executor {
         let dry = t.parametr.get("dry").and_then(|v| v.as_bool()).unwrap_or(false);
         let (report, _) = crate::cleanup::run(&cfg.cleanup, dry);
         Outcome::ok(crate::cleanup::describe(&report, dry))
+    }
+
+    async fn launch_kiosk(&self) -> Outcome {
+        let cfg = match crate::config::Config::load() {
+            Ok(c) => c,
+            Err(e) => return Outcome::fail(e.to_string()),
+        };
+        match crate::kiosk::launch(&cfg.kiosk) {
+            Ok(_) => Outcome::ok("Kiosk хөтөч амжилттай нээгдлээ"),
+            Err(e) => Outcome::fail(format!("Kiosk нээхэд алдаа: {e}")),
+        }
+    }
+
+    async fn configure_kiosk(&self, t: &Tushaal) -> Outcome {
+        let mut cfg = match crate::config::Config::load() {
+            Ok(c) => c,
+            Err(e) => return Outcome::fail(e.to_string()),
+        };
+        if let Some(enabled) = t.parametr.get("enabled").and_then(|v| v.as_bool()) {
+            cfg.kiosk.enabled = enabled;
+        }
+        if let Some(url) = t.parametr.get("url").and_then(|v| v.as_str()) {
+            cfg.kiosk.url = url.to_string();
+        }
+        if let Some(browser) = t.parametr.get("browser").and_then(|v| v.as_str()) {
+            cfg.kiosk.browser = browser.to_string();
+        }
+        if let Some(mode) = t.parametr.get("mode").and_then(|v| v.as_str()) {
+            cfg.kiosk.mode = mode.to_string();
+        }
+        if let Some(user) = t.parametr.get("username").and_then(|v| v.as_str()) {
+            cfg.kiosk.username = user.to_string();
+        }
+        if let Some(pass) = t.parametr.get("password").and_then(|v| v.as_str()) {
+            cfg.kiosk.password = pass.to_string();
+        }
+        if let Err(e) = cfg.save() {
+            return Outcome::fail(format!("Тохиргоо хадгалахад алдаа: {e}"));
+        }
+        let _ = crate::kiosk::setup_autostart(&cfg.kiosk);
+        Outcome::ok("Kiosk тохиргоо амжилттай шинэчлэгдлээ")
     }
 
     async fn diagnose(&self, kind: &str, target: &str) -> Outcome {

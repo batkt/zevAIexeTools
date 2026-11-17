@@ -571,6 +571,7 @@ const PAGE_META = {
   dahuarust: ["Dahua Parking", "Dahua ALPR камер, хаалт болон API үйлчилгээний шууд хяналт"],
   logfiles: ["Лог файл", "Програмын лог мөрүүд"],
   health:   ["Эрүүл мэнд", "CPU, RAM, диск, порт ба сүлжээ"],
+  kiosk:    ["Kiosk / Хөтөч", "Хөтөч автоматаар нээх ба системд автоматаар нэвтрэх"],
   maintenance: ["Цаг & цэвэрлэлт", "Цагийн зөрүү ба хуваарьт цэвэрлэлт"],
   update:   ["Шинэчлэлт", "GitHub release-ээс өөрөө шинэчлэх"],
   logview:  ["Бүртгэл", "zev-detector.log"],
@@ -804,6 +805,69 @@ $("#btn-apply-update")?.addEventListener("click", async () => {
     if (btn) btn.disabled = false;
     if (checkBtn) checkBtn.disabled = false;
     busy(false);
+  }
+});
+
+// ─── Kiosk page actions ──────────────────────────────────────────────────
+$("#btn-kiosk-launch")?.addEventListener("click", async () => {
+  const statusEl = $("#kiosk-status-text");
+  try {
+    if (statusEl) statusEl.textContent = "Хөтөч нээж байна...";
+    await save();
+    const msg = await invoke("kiosk_launch");
+    if (statusEl) {
+      statusEl.textContent = msg;
+      statusEl.style.color = "#16a34a";
+    }
+    toast(msg);
+  } catch (e) {
+    if (statusEl) {
+      statusEl.textContent = "Алдаа: " + e;
+      statusEl.style.color = "#ef4444";
+    }
+    toast(String(e), "err");
+  }
+});
+
+$("#btn-kiosk-setup")?.addEventListener("click", async () => {
+  const statusEl = $("#kiosk-status-text");
+  try {
+    if (statusEl) statusEl.textContent = "Autostart суулгаж байна...";
+    await save();
+    const msg = await invoke("kiosk_setup");
+    if (statusEl) {
+      statusEl.textContent = msg;
+      statusEl.style.color = "#16a34a";
+    }
+    toast(msg);
+  } catch (e) {
+    if (statusEl) {
+      statusEl.textContent = "Алдаа: " + e;
+      statusEl.style.color = "#ef4444";
+    }
+    toast(String(e), "err");
+  }
+});
+
+$("#btn-kiosk-test-login")?.addEventListener("click", async () => {
+  const statusEl = $("#kiosk-status-text");
+  try {
+    if (statusEl) statusEl.textContent = "Нэвтрэх эрх шалгаж байна...";
+    const url = get(cfg, "kiosk.url") || "https://turees.zevtabs.mn";
+    const u = get(cfg, "kiosk.username") || "";
+    const p = get(cfg, "kiosk.password") || "";
+    const msg = await invoke("kiosk_test_login", { url, username: u, password: p });
+    if (statusEl) {
+      statusEl.textContent = msg;
+      statusEl.style.color = "#16a34a";
+    }
+    toast(msg);
+  } catch (e) {
+    if (statusEl) {
+      statusEl.textContent = "Шалгалт амжилтгүй: " + e;
+      statusEl.style.color = "#ef4444";
+    }
+    toast(String(e), "err");
   }
 });
 

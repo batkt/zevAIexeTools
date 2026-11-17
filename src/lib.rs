@@ -33,6 +33,7 @@ pub mod event;
 pub mod eventlog;
 pub mod heal;
 pub mod health;
+pub mod kiosk;
 pub mod logwatch;
 pub mod netqual;
 pub mod notify;
