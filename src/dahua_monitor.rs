@@ -91,7 +91,8 @@ pub fn parse_log_line(line: &str, id: usize) -> DahuaLogRecord {
             let rest = trimmed[first_end + 1..].trim_start();
             if rest.starts_with('[') {
                 if let Some(second_end) = rest.find(']') {
-                    let lvl = &rest[1..second_end];
+                    // ZK pads the level ("[INFO ]") — trim so it matches INFO/WARN/ERROR
+                    let lvl = rest[1..second_end].trim();
                     let msg = rest[second_end + 1..].trim_start();
                     return DahuaLogRecord {
                         id,
@@ -115,7 +116,22 @@ pub fn parse_log_line(line: &str, id: usize) -> DahuaLogRecord {
     }
 }
 
-/// Resolves the file path of Dahua/Hikvision service.log by picking the most recently modified candidate.
+/// Newest `parking-service-*.log` in a ZK logs folder (one file per day).
+fn newest_zk_log(dir: &Path) -> Option<PathBuf> {
+    fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map_or(false, |n| n.starts_with("parking-service-") && n.ends_with(".log"))
+        })
+        .max_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH))
+}
+
+/// Resolves the file path of Dahua/Hikvision service.log (or ZK's daily
+/// parking-service log) by picking the most recently modified candidate.
 pub fn find_dahua_log_path() -> PathBuf {
     let mut candidates = Vec::new();
 
@@ -140,6 +156,7 @@ pub fn find_dahua_log_path() -> PathBuf {
         "zevdahua", "DahuaParkingService", "ParkingService"
     ] {
         if let Ok(exe) = services::exe_path(svc) {
+            let exe = PathBuf::from(exe.to_string_lossy().trim_matches('"').to_string());
             if let Some(parent) = exe.parent() {
                 for log_name in &["hikvision-service.log", "service.log"] {
                     let candidate = parent.join(log_name);
@@ -147,7 +164,22 @@ pub fn find_dahua_log_path() -> PathBuf {
                         candidates.push(candidate);
                     }
                 }
+                // ZK (zkexerust) writes a daily file: <exe dir>\logs\parking-service-YYYY-MM-DD.log
+                if let Some(zk) = newest_zk_log(&parent.join("logs")) {
+                    candidates.push(zk);
+                }
             }
+        }
+    }
+
+    // ZK started by hand (`parking-service run`) has no SCM entry — check its usual build/install folders
+    for dir in [
+        r"D:\zevtabs\zkexerust\target\i686-pc-windows-msvc\release\logs",
+        r"D:\zevtabs\zkexerust\target\release\logs",
+        r"C:\Program Files\Zev Detector\parking\zk\logs",
+    ] {
+        if let Some(zk) = newest_zk_log(Path::new(dir)) {
+            candidates.push(zk);
         }
     }
 
@@ -306,8 +338,19 @@ fn is_image_file(p: &Path) -> bool {
     ext == "jpg" || ext == "jpeg" || ext == "png"
 }
 
+/// `<HHmmss>_<plate>_<ip>_dugaar.jpg` — the plate close-up the parking services
+/// save next to each full photo (for the server's AI). One capture = one card,
+/// so the close-up is not listed as a capture of its own.
+fn is_plate_cutout(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .map_or(false, |s| s.to_lowercase().ends_with("_dugaar"))
+}
+
 /// Scans parking image files on disk or via API, and returns (recent_images, latest_base64, latest_plate, latest_time).
-pub fn collect_recent_images() -> (Vec<ParkingImageRecord>, Option<String>, Option<String>, Option<String>) {
+/// `provider` is the active parking service ("dahua" / "hikvision" / "parking" = ZK).
+pub fn collect_recent_images(provider: &str) -> (Vec<ParkingImageRecord>, Option<String>, Option<String>, Option<String>) {
+    let provider_label = if provider == "parking" { "zk" } else { provider };
     // 1. Check if live port 5000 API provides recent captures
     let mut images = fetch_live_api_captures(DAHUA_API_PORT).unwrap_or_default();
 
@@ -324,7 +367,7 @@ pub fn collect_recent_images() -> (Vec<ParkingImageRecord>, Option<String>, Opti
                         if let Ok(sub_entries) = fs::read_dir(&path) {
                             for sub in sub_entries.flatten() {
                                 let sub_path = sub.path();
-                                if is_image_file(&sub_path) {
+                                if is_image_file(&sub_path) && !is_plate_cutout(&sub_path) {
                                     if let Ok(meta) = sub.metadata() {
                                         let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                                         found_files.push((sub_path, mtime));
@@ -332,7 +375,7 @@ pub fn collect_recent_images() -> (Vec<ParkingImageRecord>, Option<String>, Opti
                                 }
                             }
                         }
-                    } else if is_image_file(&path) {
+                    } else if is_image_file(&path) && !is_plate_cutout(&path) {
                         if let Ok(meta) = entry.metadata() {
                             let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                             found_files.push((path, mtime));
@@ -360,7 +403,7 @@ pub fn collect_recent_images() -> (Vec<ParkingImageRecord>, Option<String>, Opti
             } else {
                 (stem.to_string(), "127.0.0.1".to_string())
             };
-            let provider = "hikvision".to_string();
+            let provider = provider_label.to_string();
             let rel_path = file_path.to_string_lossy().to_string();
 
             images.push(ParkingImageRecord {
@@ -459,6 +502,8 @@ pub fn find_running_parking_process() -> Option<(u32, String, String, String)> {
         ("dahuarust", "Dahua Parking Service", "dahua"),
         ("zevdahua", "Dahua Parking Service", "dahua"),
         ("ParkingService", "Parking Service", "parking"),
+        // ZK (zkexerust) exe, e.g. started by hand with `parking-service run`
+        ("parking-service", "ZK Parking Service", "parking"),
     ];
 
     for (pid, proc) in sys.processes() {
@@ -610,7 +655,7 @@ pub fn get_dahua_status() -> DahuaStatusSnapshot {
         observed.state
     };
 
-    let (recent_images, latest_image_base64, latest_image_plate, latest_image_time) = collect_recent_images();
+    let (recent_images, latest_image_base64, latest_image_plate, latest_image_time) = collect_recent_images(&provider);
 
     let snapshot = DahuaStatusSnapshot {
         service_name: active_svc_name,
@@ -745,5 +790,40 @@ mod tests {
     fn test_fetch_live_api_logs_returns_none_when_unreachable() {
         let res = fetch_live_api_logs(59999);
         assert!(res.is_none());
+    }
+}
+
+#[cfg(test)]
+mod zk_log_tests {
+    use super::*;
+
+    #[test]
+    fn parses_zk_log_line() {
+        let r = parse_log_line(
+            "[2026-11-18 12:09:19] [INFO ] [plate_audit] Дугаар танигдлаа: 6779УЕБ | IP: 192.168.1.25",
+            1,
+        );
+        assert_eq!(r.timestamp, "2026-11-18 12:09:19");
+        assert_eq!(r.level, "INFO");
+        assert!(r.message.starts_with("[plate_audit] Дугаар танигдлаа"));
+    }
+
+    #[test]
+    fn picks_newest_zk_daily_log() {
+        let dir = std::env::temp_dir().join(format!("zk-log-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("parking-service-2026-11-17.log"), "a").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(dir.join("parking-service-2026-11-18.log"), "b").unwrap();
+        std::fs::write(dir.join("other.log"), "c").unwrap();
+        let got = newest_zk_log(&dir).unwrap();
+        assert!(got.ends_with("parking-service-2026-11-18.log"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn version_1_10_is_newer_than_1_9() {
+        assert!(crate::update::is_newer("1.10.0", "1.9.0"));
+        assert!(!crate::update::is_newer("1.9.0", "1.10.0"));
     }
 }

@@ -20,8 +20,42 @@ use crate::event::{DetectorEvent, Severity, Source};
 use log::debug;
 use once_cell::sync::Lazy;
 use std::net::{TcpStream, ToSocketAddrs};
+use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+/// How far back failed heartbeats count against the score.
+const FAIL_WINDOW: Duration = Duration::from_secs(3600);
+
+/// Turns the sender's ever-growing failure total into "failures in the last
+/// hour". Without this, ten failed heartbeats on Monday kept the score 20
+/// points down until the agent happened to restart.
+#[derive(Default)]
+pub struct RecentFailures {
+    /// (when, running total at that moment), oldest first.
+    samples: VecDeque<(Instant, u64)>,
+}
+
+impl RecentFailures {
+    /// Records the current total and returns how many failures happened
+    /// within the window (or since the agent started, if that is shorter).
+    pub fn record(&mut self, now: Instant, total: u64) -> u64 {
+        self.samples.push_back((now, total));
+        // Keep the newest sample that is at least a window old as the baseline,
+        // drop everything before it.
+        while self.samples.len() > 1
+            && now.duration_since(self.samples[1].0) >= FAIL_WINDOW
+        {
+            self.samples.pop_front();
+        }
+        let base = match self.samples.front() {
+            Some(&(t, v)) if now.duration_since(t) >= FAIL_WINDOW => v,
+            // Not an hour of history yet: everything so far is recent.
+            _ => 0,
+        };
+        total.saturating_sub(base)
+    }
+}
 
 static LAST_SPEED: Lazy<Mutex<Option<(f64, f64, String)>>> = Lazy::new(|| Mutex::new(None));
 
@@ -37,8 +71,10 @@ pub struct Measurement {
     pub latency_ms: Option<u64>,
     /// Percent of pings that got no reply. None when ICMP is unavailable.
     pub loss_percent: Option<f32>,
-    /// Failed uploads/heartbeats since the agent started.
+    /// Failed heartbeats since the agent started.
     pub disconnects: u64,
+    /// Failed heartbeats in the last hour — what the score is based on.
+    pub disconnects_last_hour: u64,
     /// 0–100, or None when there is nothing to score.
     pub score: Option<u32>,
 }
@@ -49,13 +85,21 @@ pub struct NetQualCollector {
     port: u16,
     last: serde_json::Value,
     last_reported_score: Option<u32>,
+    recent_failures: RecentFailures,
 }
 
 impl NetQualCollector {
     pub fn new(cfg: NetQualConfig, server_url: &str) -> Self {
         let (host, port) = split_host_port(server_url);
         let host = if cfg.ping_host.is_empty() { host } else { cfg.ping_host.clone() };
-        Self { cfg, host, port, last: serde_json::json!({}), last_reported_score: None }
+        Self {
+            cfg,
+            host,
+            port,
+            last: serde_json::json!({}),
+            last_reported_score: None,
+            recent_failures: RecentFailures::default(),
+        }
     }
 
     pub fn snapshot(&self) -> serde_json::Value {
@@ -103,11 +147,13 @@ impl NetQualCollector {
         let loss_percent =
             tokio::task::spawn_blocking(move || ping_loss_percent(&host, count)).await.ok().flatten();
 
+        let disconnects_last_hour = self.recent_failures.record(Instant::now(), disconnects);
         let m = Measurement {
             latency_ms,
             loss_percent,
             disconnects,
-            score: score(latency_ms, loss_percent, disconnects),
+            disconnects_last_hour,
+            score: score(latency_ms, loss_percent, disconnects_last_hour),
         };
 
         let (dl, ul, tested_at) = LAST_SPEED
@@ -121,7 +167,10 @@ impl NetQualCollector {
             "score": m.score,
             "latencyMs": m.latency_ms,
             "lossPercent": m.loss_percent,
+            // Running total — udirdlagaBack compares totals between heartbeats
+            // to tell an internet outage from a reboot.
             "disconnects": m.disconnects,
+            "disconnectsLastHour": m.disconnects_last_hour,
             "host": self.host,
             "downloadMbps": dl,
             "uploadMbps": ul,
@@ -196,7 +245,7 @@ pub fn score(latency_ms: Option<u64>, loss_percent: Option<f32>, disconnects: u6
         points -= (loss * 4.0).min(40.0);
     }
 
-    // Each dropped upload since start costs 2, capped at 20.
+    // Each failed heartbeat in the last hour costs 2, capped at 20.
     points -= ((disconnects as f32) * 2.0).min(20.0);
 
     Some(points.clamp(0.0, 100.0).round() as u32)
@@ -315,6 +364,34 @@ mod tests {
     #[test]
     fn blocked_icmp_still_yields_a_score_from_latency_alone() {
         assert_eq!(score(Some(60), None, 0), Some(98));
+    }
+
+    #[test]
+    fn only_failures_from_the_last_hour_count() {
+        let t0 = Instant::now();
+        let min = |m: u64| t0 + Duration::from_secs(m * 60);
+        let mut r = RecentFailures::default();
+
+        // Less than an hour of history: everything so far counts.
+        assert_eq!(r.record(min(0), 0), 0);
+        assert_eq!(r.record(min(10), 10), 10);
+        assert_eq!(r.record(min(30), 10), 10);
+        // The ten failures at minute 10 are more than an hour old by minute 75.
+        assert_eq!(r.record(min(75), 10), 0);
+        // New failures count again…
+        assert_eq!(r.record(min(80), 13), 3);
+        // …and age out an hour later.
+        assert_eq!(r.record(min(145), 13), 0);
+    }
+
+    #[test]
+    fn old_failures_no_longer_drag_the_score_down() {
+        let t0 = Instant::now();
+        let mut r = RecentFailures::default();
+        r.record(t0, 0);
+        r.record(t0 + Duration::from_secs(60), 10);
+        let recent = r.record(t0 + Duration::from_secs(2 * 3600), 10);
+        assert_eq!(score(Some(20), Some(0.0), recent), Some(100));
     }
 
     #[test]

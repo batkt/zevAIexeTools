@@ -62,10 +62,10 @@ pub struct TimeSyncCollector {
 }
 
 impl TimeSyncCollector {
-    pub fn new(cfg: TimeSyncConfig, server_url: &str) -> Self {
+    pub fn new(cfg: TimeSyncConfig, server_url: &str, server_insecure_tls: bool) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
-            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_certs(server_insecure_tls)
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {

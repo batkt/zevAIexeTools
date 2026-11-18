@@ -140,9 +140,71 @@ fn main() {
         }
         Some("run") => run_interactive(),
         Some("test") => run_test(),
+        Some("discover") => run_discover(&args[2..]),
+        Some("parking-setup") => match zev_detector::parking::run_cli(&args[2..]) {
+            Ok(msg) => println!("{msg}"),
+            Err(e) => {
+                eprintln!("✗ {e}");
+                std::process::exit(1);
+            }
+        },
+        Some("setup") => match zev_detector::setup::run_cli(&args[2..]) {
+            Ok(msg) => println!("{msg}"),
+            Err(e) => {
+                eprintln!("✗ {e}");
+                std::process::exit(1);
+            }
+        },
         Some("--version") | Some("-v") => println!("zev-detector {}", sender::AGENT_VERSION),
         Some("help") | Some("--help") | Some("-h") => print_help(),
         _ => winsvc::dispatch(),
+    }
+}
+
+/// `discover [--json|--tsv] [--out FILE]` — the installer uses `--tsv --out`.
+fn run_discover(args: &[String]) {
+    let fmt = if args.iter().any(|a| a == "--json") {
+        "json"
+    } else if args.iter().any(|a| a == "--tsv") {
+        "tsv"
+    } else {
+        "table"
+    };
+    let out = args.iter().position(|a| a == "--out").and_then(|i| args.get(i + 1));
+
+    let cams = zev_detector::discover::discover();
+    let text = match fmt {
+        "json" => serde_json::to_string_pretty(&cams).unwrap_or_else(|_| "[]".into()),
+        "tsv" => zev_detector::discover::to_tsv(&cams),
+        _ => {
+            let nets = zev_detector::discover::local_ipv4s()
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut t = format!("Сүлжээ: {nets}\n{} камер олдлоо\n", cams.len());
+            for c in &cams {
+                t.push_str(&format!(
+                    "  {:<16} {:<10} {:<24} {:<18} порт {:?} ({})\n",
+                    c.ip,
+                    c.vendor,
+                    c.model,
+                    c.mac,
+                    c.ports,
+                    c.sources.join("+")
+                ));
+            }
+            t
+        }
+    };
+    match out {
+        Some(path) => {
+            if let Err(e) = std::fs::write(path, &text) {
+                eprintln!("✗ {path}: {e}");
+                std::process::exit(1);
+            }
+        }
+        None => print!("{text}"),
     }
 }
 
@@ -174,6 +236,8 @@ fn print_help() {
          status      Show the service state\n\
          run         Run in this console (Ctrl+C to quit)\n\
          test        Run one collection pass and print what was found\n\
+         discover    Find IP cameras on the local network [--json | --tsv] [--out FILE]\n\
+         setup       --name NAME [--camera ip|port|vendor|model]... [--clear-cameras]\n\
          --version   Print the version\n\n\
          The desktop app is a separate binary: zev-detector-ui.exe",
         sender::AGENT_VERSION

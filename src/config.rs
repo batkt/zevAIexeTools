@@ -325,6 +325,12 @@ pub struct ServerConfig {
     /// Max events kept on disk while offline before the oldest are dropped
     #[serde(default = "d_queue_max")]
     pub queue_max: usize,
+    /// Skip TLS certificate checks when talking to the server. Off by default:
+    /// the heartbeat response carries commands that run as LocalSystem, so an
+    /// unverified connection would let anyone in the middle run code here.
+    /// Only for a machine whose clock or root certificates cannot be fixed.
+    #[serde(default)]
+    pub insecure_tls: bool,
 }
 
 pub fn d_server_url() -> String {
@@ -341,6 +347,7 @@ impl Default for ServerConfig {
             batch_size: d_batch(),
             send_interval_secs: d_send_interval(),
             queue_max: d_queue_max(),
+            insecure_tls: false,
         }
     }
 }

@@ -27,7 +27,7 @@ pub async fn run_app(mut cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<(
     let mut hlth = health::HealthCollector::new(cfg.health.clone());
     let mut netq = netqual::NetQualCollector::new(cfg.netqual.clone(), &cfg.server.url);
     let mut prts = ports::PortCollector::new(cfg.ports.clone());
-    let mut clock = timesync::TimeSyncCollector::new(cfg.timesync.clone(), &cfg.server.url);
+    let mut clock = timesync::TimeSyncCollector::new(cfg.timesync.clone(), &cfg.server.url, cfg.server.insecure_tls);
     let mut updater = update::Updater::new(cfg.update.clone());
     let mut notifier = notify::LocalNotifier::new(&cfg.notify, &state_dir);
     let mut out = sender::Sender::new(cfg.server.clone(), cfg.agent.clone(), &state_dir);
@@ -74,7 +74,12 @@ pub async fn run_app(mut cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<(
     let mut due_log = Instant::now();
     let mut due_health = Instant::now();
     let mut due_send = Instant::now() + Duration::from_secs(5);
-    let mut due_beat = Instant::now() + Duration::from_secs(10);
+    // The heartbeat runs in its own task (below) and sends whatever snapshot
+    // this loop last published. Anything slow here — a failing upload with
+    // retries, the weekly cleanup, a command — used to hold the heartbeat back
+    // long enough for the server to call a healthy machine offline.
+    let mut due_snap = Instant::now();
+    let snap_int = Duration::from_secs(15);
     // Pinging costs a second or two, so it starts after the first heartbeat
     // rather than competing with startup.
     let mut due_net = Instant::now();
@@ -98,6 +103,33 @@ pub async fn run_app(mut cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<(
     let update_int = Duration::from_secs(cfg.update.check_interval_hours.max(1) * 3600);
     let notify_int = Duration::from_secs(15);
     let kiosk_int = Duration::from_secs(30);
+
+    let (snap_tx, snap_rx) = tokio::sync::watch::channel::<Option<sender::HeartbeatSnapshot>>(None);
+    let (resp_tx, mut resp_rx) = tokio::sync::mpsc::unbounded_channel::<sender::HeartbeatResponse>();
+    let beat_now = Arc::new(tokio::sync::Notify::new());
+    let heartbeat_task = {
+        let mut beater = out.beater();
+        let beat_now = beat_now.clone();
+        let stop = stop.clone();
+        tokio::spawn(async move {
+            // Give the collectors one pass so the first beat carries real data.
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            while !stop.load(Ordering::Relaxed) {
+                let snap = snap_rx.borrow().clone();
+                if let Some(snap) = snap {
+                    if let Some(resp) = beater.send(&snap).await {
+                        if resp_tx.send(resp).is_err() {
+                            break; // main loop is gone
+                        }
+                    }
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(beat_int) => {}
+                    _ = beat_now.notified() => {}
+                }
+            }
+        })
+    };
 
     while !stop.load(Ordering::Relaxed) {
         let now = Instant::now();
@@ -249,20 +281,14 @@ pub async fn run_app(mut cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<(
             out.flush().await;
         }
 
-        if now >= due_beat {
-            due_beat = now + beat_int;
-            let resp = out
-                .heartbeat(sender::HeartbeatData {
-                    services: svc.snapshot(),
-                    health: hlth.snapshot(),
-                    heals: healer.snapshot(),
-                    network: netq.snapshot(),
-                    ports: prts.snapshot(),
-                    clock: clock.snapshot(),
-                    dahua: serde_json::to_value(crate::dahua_monitor::get_dahua_status())
-                        .unwrap_or(serde_json::Value::Null),
-                })
-                .await;
+        // Replies the heartbeat task brought back: remote config and commands.
+        let mut beat_soon = false;
+        while let Ok(resp) = resp_rx.try_recv() {
+            out.update_identity(
+                resp.baiguullagiin_id.as_deref(),
+                resp.baiguullagiin_ner.as_deref(),
+                resp.barilgiin_id.as_deref(),
+            );
 
             // Apply remote dynamic configuration from backend if present
             if let Some(tokhirgoo) = resp.tokhirgoo {
@@ -304,14 +330,38 @@ pub async fn run_app(mut cfg: Config, stop: Arc<AtomicBool>) -> anyhow::Result<(
                 out.tushaal_khariu(&t.id, result.amjilttai, &result.ur_dun, &result.aldaa)
                     .await;
                 if t.turul == "diagSpeed" && result.amjilttai {
-                    due_beat = now;
+                    // Send the fresh speed figures now rather than in a minute.
+                    beat_soon = true;
                 }
             }
+        }
+
+        if beat_soon || Instant::now() >= due_snap {
+            due_snap = Instant::now() + snap_int;
+            let snap = sender::HeartbeatSnapshot {
+                data: sender::HeartbeatData {
+                    services: svc.snapshot(),
+                    health: hlth.snapshot(),
+                    heals: healer.snapshot(),
+                    network: netq.snapshot(),
+                    ports: prts.snapshot(),
+                    clock: clock.snapshot(),
+                    dahua: serde_json::to_value(crate::dahua_monitor::get_dahua_status())
+                        .unwrap_or(serde_json::Value::Null),
+                },
+                queue_length: out.queue_len(),
+                taken: Instant::now(),
+            };
+            let _ = snap_tx.send(Some(snap));
+        }
+        if beat_soon {
+            beat_now.notify_one();
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
+    heartbeat_task.abort();
     info!("Stop requested — flushing queue");
     out.flush().await;
     info!("=== Zev Detector stopped ===");

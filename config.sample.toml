@@ -10,6 +10,7 @@ retry_count        = 3
 batch_size         = 50
 send_interval_secs = 30
 queue_max          = 5000        # events held on disk while offline
+# insecure_tls     = false       # true = skip certificate checks (last resort only)
 
 [agent]
 # name defaults to the Windows computer name if left empty
